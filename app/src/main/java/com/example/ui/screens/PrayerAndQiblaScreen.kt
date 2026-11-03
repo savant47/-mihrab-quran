@@ -311,10 +311,13 @@ fun PrayerAndQiblaScreen() {
                 // Header Row: Title + Sensor/GPS Status Badge
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(42.dp)
@@ -331,29 +334,33 @@ fun PrayerAndQiblaScreen() {
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "محراب القبلة المشرفة",
-                                style = MaterialTheme.typography.titleLarge,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = GoldAccent
+                                color = GoldAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "يعمل أوفلاين وأونلاين عبر مستشعرات الجهاز والـ GPS",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                                fontSize = 11.sp
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (hasCompassSensor) EmeraldGreen.copy(alpha = 0.16f) else GoldAccent.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(50),
+                        color = RoyalNavyDark,
                         border = BorderStroke(1.dp, if (hasCompassSensor) EmeraldGreen else GoldAccent)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -365,9 +372,11 @@ fun PrayerAndQiblaScreen() {
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (hasCompassSensor) "المستشعر نشط" else "ضبط يدوي",
-                                fontSize = 10.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (hasCompassSensor) EmeraldGreen else GoldAccent
+                                color = if (hasCompassSensor) Color(0xFF4ADE80) else GoldAccent,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -378,15 +387,15 @@ fun PrayerAndQiblaScreen() {
                 // Location & Permissions Action Bar (GPS + Offline City Selector)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = RoyalNavyDark.copy(alpha = 0.7f),
-                    border = BorderStroke(0.8.dp, GoldBorder),
+                    color = RoyalNavyDark,
+                    border = BorderStroke(1.dp, GoldBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -408,15 +417,15 @@ fun PrayerAndQiblaScreen() {
                                     Text(
                                         text = settings.locationName,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 13.sp,
+                                        color = Color(0xFFFDF8EE),
+                                        fontSize = 13.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "المسافة للكعبة المشرفة: $distanceToKaabaKm كم",
-                                        color = GoldAccent.copy(alpha = 0.9f),
-                                        fontSize = 11.sp,
+                                        color = GoldAccent,
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -425,13 +434,14 @@ fun PrayerAndQiblaScreen() {
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Button(
                                 onClick = { requestGpsLocation() },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .heightIn(min = 40.dp)
+                                    .height(44.dp)
                                     .testTag("qibla_gps_permission_button"),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -455,9 +465,12 @@ fun PrayerAndQiblaScreen() {
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (isDetectingGps) "جاري تحديد الموقع..." else "تحديد الموقع (GPS)",
+                                    text = if (isDetectingGps) "جاري التحديد..." else "تحديد الموقع (GPS)",
                                     fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
@@ -465,7 +478,7 @@ fun PrayerAndQiblaScreen() {
                                 onClick = { showOfflineCitySheet = true },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .heightIn(min = 40.dp)
+                                    .height(44.dp)
                                     .testTag("qibla_offline_city_button"),
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(1.dp, GoldAccent),
@@ -479,9 +492,12 @@ fun PrayerAndQiblaScreen() {
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "اختيار مدينة (أوفلاين)",
+                                    text = "اختيار مدينة يدوياً",
                                     fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -493,12 +509,9 @@ fun PrayerAndQiblaScreen() {
                 // Large Animated Direction Instruction Banner
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isAlignedWithQibla)
-                        EmeraldGreen.copy(alpha = 0.22f)
-                    else
-                        RoyalNavyDark,
+                    color = RoyalNavyDark,
                     border = BorderStroke(
-                        width = if (isAlignedWithQibla) 2.dp else 1.dp,
+                        width = if (isAlignedWithQibla) 2.dp else 1.2.dp,
                         color = if (isAlignedWithQibla) EmeraldGreen else GoldAccent
                     ),
                     modifier = Modifier.fillMaxWidth()
@@ -516,9 +529,9 @@ fun PrayerAndQiblaScreen() {
                         }
                         Text(
                             text = directionInstruction,
-                            fontSize = 21.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (isAlignedWithQibla) EmeraldGreen else GoldAccent,
+                            color = if (isAlignedWithQibla) Color(0xFF4ADE80) else GoldAccent,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -527,8 +540,8 @@ fun PrayerAndQiblaScreen() {
                                 "تقبل الله طاعتكم وصلاتكم — المحراب مضيء باتجاه الكعبة المشرفة"
                             else
                                 "أمسك الهاتف بشكل مسطح وأدره حتى ينطبق سهم القبلة الذهبي مع قمة المحراب",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            fontSize = 12.sp,
+                            color = Color(0xFFFDF8EE).copy(alpha = 0.92f),
                             textAlign = TextAlign.Center
                         )
                     }

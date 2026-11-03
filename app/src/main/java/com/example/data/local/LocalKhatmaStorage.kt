@@ -3,6 +3,8 @@ package com.example.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.QuranDataHelper
+import com.example.data.SpiritualMessageItem
+import com.example.data.SpiritualStartupMessageHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
 import com.example.data.model.User
@@ -14,7 +16,8 @@ import org.json.JSONObject
 
 /**
  * Local device storage for Mihrabi.
- * Persists all Khatma tracks, reading logs, and profile info strictly to device storage.
+ * Persists all Khatma tracks, reading logs, startup spiritual messages,
+ * and supports full local Backup & Restore (.json / clipboard) so progress is never lost on app update.
  */
 class LocalKhatmaStorage private constructor(context: Context) {
 
@@ -32,19 +35,120 @@ class LocalKhatmaStorage private constructor(context: Context) {
     private val _readingLogsFlow = MutableStateFlow(loadReadingLogs())
     val readingLogsFlow: StateFlow<List<ReadingLog>> = _readingLogsFlow.asStateFlow()
 
+    private val _spiritualMessagesFlow = MutableStateFlow(loadSpiritualMessages())
+    val spiritualMessagesFlow: StateFlow<List<SpiritualMessageItem>> = _spiritualMessagesFlow.asStateFlow()
+
     companion object {
         private const val PREFS_NAME = "quran_companion_local_storage"
         private const val KEY_GUEST_USER = "guest_user_json"
         private const val KEY_TRACKS = "tracks_json_array"
         private const val KEY_READING_LOGS = "reading_logs_json_array"
+        private const val KEY_SPIRITUAL_MESSAGES = "spiritual_messages_json_array"
+        private const val KEY_SPIRITUAL_ROTATION_INDEX = "spiritual_rotation_index"
 
         @Volatile
         private var instance: LocalKhatmaStorage? = null
+
+        @Volatile
+        private var hasShownStartupMessageInProcess: Boolean = false
 
         fun getInstance(context: Context): LocalKhatmaStorage {
             return instance ?: synchronized(this) {
                 instance ?: LocalKhatmaStorage(context).also { instance = it }
             }
+        }
+    }
+
+    /**
+     * Triggered once per app launch process. Picks the next non-repeating Quranic Dua / Hadith,
+     * saves it into the Spiritual Messages History so the user can always revisit it in "السجل",
+     * and returns it to display in the ornate startup dialog.
+     */
+    fun consumeStartupMessageForSessionIfNeeded(): SpiritualMessageItem? {
+        synchronized(Companion) {
+            if (hasShownStartupMessageInProcess) return null
+            hasShownStartupMessageInProcess = true
+            return recordNextStartupMessage()
+        }
+    }
+
+    fun recordNextStartupMessage(): SpiritualMessageItem {
+        val templates = SpiritualStartupMessageHelper.allMessages
+        val savedIdx = prefs.getInt(KEY_SPIRITUAL_ROTATION_INDEX, 0).coerceAtLeast(0)
+        val template = templates[savedIdx % templates.size]
+        val nextIdx = (savedIdx + 1) % templates.size
+
+        val now = System.currentTimeMillis()
+        val item = SpiritualMessageItem(
+            id = "msg_$now",
+            categoryTitle = template.categoryTitle,
+            arabicText = template.arabicText,
+            sourceReference = template.sourceReference,
+            timestampMillis = now,
+            isRead = false
+        )
+
+        val currentList = loadSpiritualMessages().toMutableList()
+        currentList.add(0, item)
+        // Keep up to 100 recent startup messages in history
+        val trimmed = currentList.take(100)
+        saveSpiritualMessages(trimmed)
+        prefs.edit().putInt(KEY_SPIRITUAL_ROTATION_INDEX, nextIdx).apply()
+        return item
+    }
+
+    fun markStartupMessageAsRead(messageId: String) {
+        val updated = loadSpiritualMessages().map { msg ->
+            if (msg.id == messageId) msg.copy(isRead = true) else msg
+        }
+        saveSpiritualMessages(updated)
+    }
+
+    private fun loadSpiritualMessages(): List<SpiritualMessageItem> {
+        val json = prefs.getString(KEY_SPIRITUAL_MESSAGES, null)
+        if (!json.isNullOrBlank()) {
+            try {
+                val arr = JSONArray(json)
+                val list = mutableListOf<SpiritualMessageItem>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        SpiritualMessageItem(
+                            id = obj.optString("id", "msg_$i"),
+                            categoryTitle = obj.optString("categoryTitle", "دعاء قرآني من المصحف الشريف"),
+                            arabicText = obj.optString("arabicText", ""),
+                            sourceReference = obj.optString("sourceReference", ""),
+                            timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
+                            isRead = obj.optBoolean("isRead", false)
+                        )
+                    )
+                }
+                return list
+            } catch (_: Exception) {
+                // fall through
+            }
+        }
+        return emptyList()
+    }
+
+    private fun saveSpiritualMessages(messages: List<SpiritualMessageItem>) {
+        try {
+            val arr = JSONArray()
+            messages.forEach { msg ->
+                val obj = JSONObject().apply {
+                    put("id", msg.id)
+                    put("categoryTitle", msg.categoryTitle)
+                    put("arabicText", msg.arabicText)
+                    put("sourceReference", msg.sourceReference)
+                    put("timestampMillis", msg.timestampMillis)
+                    put("isRead", msg.isRead)
+                }
+                arr.put(obj)
+            }
+            prefs.edit().putString(KEY_SPIRITUAL_MESSAGES, arr.toString()).apply()
+            _spiritualMessagesFlow.value = messages
+        } catch (_: Exception) {
+            // ignore
         }
     }
 
@@ -333,6 +437,158 @@ class LocalKhatmaStorage private constructor(context: Context) {
                 progressPercentage = progressPercentage
             )
         )
+    }
+
+    /**
+     * Exports all user progress, Khatma tracks, reading logs, startup messages history,
+     * Mushaf bookmarks, and Adhan/Prayer settings into a single JSON string for local backup.
+     */
+    fun exportFullBackupJson(context: Context): String {
+        val root = JSONObject()
+        root.put("app", "محرابي - Mihrabi")
+        root.put("backupFormatVersion", 2)
+        root.put("exportedAtMillis", System.currentTimeMillis())
+
+        prefs.getString(KEY_GUEST_USER, null)?.let { root.put("guestUserRaw", JSONObject(it)) }
+        prefs.getString(KEY_TRACKS, null)?.let { root.put("tracksRaw", JSONArray(it)) }
+        prefs.getString(KEY_READING_LOGS, null)?.let { root.put("readingLogsRaw", JSONArray(it)) }
+        prefs.getString(KEY_SPIRITUAL_MESSAGES, null)?.let { root.put("spiritualMessagesRaw", JSONArray(it)) }
+        root.put("spiritualRotationIndex", prefs.getInt(KEY_SPIRITUAL_ROTATION_INDEX, 0))
+
+        // Export quran_reader_prefs (Mushaf page bookmarks per track)
+        val quranPrefs = context.applicationContext.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
+        root.put("quranReaderPrefs", sharedPrefsToJson(quranPrefs))
+
+        // Export prayer & Adhan settings
+        val prayerPrefs = context.applicationContext.getSharedPreferences("mihrabi_five_prayers_prefs", Context.MODE_PRIVATE)
+        root.put("prayerSettingsPrefs", sharedPrefsToJson(prayerPrefs))
+
+        // Export custom Werd alarms
+        val alarmPrefs = context.applicationContext.getSharedPreferences("mihrabi_alarm_prefs", Context.MODE_PRIVATE)
+        root.put("alarmPrefs", sharedPrefsToJson(alarmPrefs))
+
+        return root.toString(2)
+    }
+
+    /**
+     * Imports a previously exported JSON backup and immediately updates all active StateFlows.
+     */
+    fun importFullBackupJson(context: Context, jsonString: String): Result<String> {
+        return try {
+            val cleaned = jsonString.trim()
+            if (cleaned.isEmpty()) {
+                return Result.failure(IllegalArgumentException("ملف النسخة الاحتياطية فارغ."))
+            }
+            val root = JSONObject(cleaned)
+            val editor = prefs.edit()
+
+            var restoredTracksCount = 0
+            var restoredLogsCount = 0
+
+            if (root.has("guestUserRaw")) {
+                editor.putString(KEY_GUEST_USER, root.getJSONObject("guestUserRaw").toString())
+            }
+            if (root.has("tracksRaw")) {
+                val arr = root.getJSONArray("tracksRaw")
+                restoredTracksCount = arr.length()
+                editor.putString(KEY_TRACKS, arr.toString())
+            }
+            if (root.has("readingLogsRaw")) {
+                val arr = root.getJSONArray("readingLogsRaw")
+                restoredLogsCount = arr.length()
+                editor.putString(KEY_READING_LOGS, arr.toString())
+            }
+            if (root.has("spiritualMessagesRaw")) {
+                val arr = root.getJSONArray("spiritualMessagesRaw")
+                editor.putString(KEY_SPIRITUAL_MESSAGES, arr.toString())
+            }
+            if (root.has("spiritualRotationIndex")) {
+                editor.putInt(KEY_SPIRITUAL_ROTATION_INDEX, root.optInt("spiritualRotationIndex", 0))
+            }
+            editor.commit()
+
+            if (root.has("quranReaderPrefs")) {
+                val quranPrefs = context.applicationContext.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("quranReaderPrefs"), quranPrefs)
+            }
+            if (root.has("prayerSettingsPrefs")) {
+                val prayerPrefs = context.applicationContext.getSharedPreferences("mihrabi_five_prayers_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("prayerSettingsPrefs"), prayerPrefs)
+            }
+            if (root.has("alarmPrefs")) {
+                val alarmPrefs = context.applicationContext.getSharedPreferences("mihrabi_alarm_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("alarmPrefs"), alarmPrefs)
+            }
+
+            // Refresh all StateFlows immediately so UI reflects restored progress right away
+            _guestUserFlow.value = loadGuestUser()
+            val loadedTracks = loadTracks()
+            _tracksFlow.value = loadedTracks
+            val loadedLogs = loadReadingLogs()
+            _readingLogsFlow.value = loadedLogs
+            _spiritualMessagesFlow.value = loadSpiritualMessages()
+
+            val mainTrack = loadedTracks.firstOrNull()
+            val summary = if (mainTrack != null) {
+                "تمت استعادة النسخة الاحتياطية بنجاح (${loadedTracks.size} ورد • ${loadedLogs.size} سجل قراءة • التوقف عند سورة ${mainTrack.currentSurah} صفحة ${mainTrack.currentPage})"
+            } else {
+                "تمت استعادة النسخة الاحتياطية بنجاح ($restoredTracksCount ورد و $restoredLogsCount سجل)."
+            }
+            Result.success(summary)
+        } catch (e: Exception) {
+            Result.failure(Exception("تعذر قراءة بيانات النسخة الاحتياطية. تأكد من اختيار ملف أو كود نسخ احتياطي صحيح لتطبيق محرابي."))
+        }
+    }
+
+    private fun sharedPrefsToJson(sp: SharedPreferences): JSONObject {
+        val obj = JSONObject()
+        for ((key, value) in sp.all) {
+            if (value == null) continue
+            val entry = JSONObject()
+            when (value) {
+                is Boolean -> {
+                    entry.put("type", "bool")
+                    entry.put("val", value)
+                }
+                is Int -> {
+                    entry.put("type", "int")
+                    entry.put("val", value)
+                }
+                is Long -> {
+                    entry.put("type", "long")
+                    entry.put("val", value)
+                }
+                is Float -> {
+                    entry.put("type", "float")
+                    entry.put("val", value.toDouble())
+                }
+                is String -> {
+                    entry.put("type", "string")
+                    entry.put("val", value)
+                }
+            }
+            if (entry.has("type")) {
+                obj.put(key, entry)
+            }
+        }
+        return obj
+    }
+
+    private fun jsonToSharedPrefs(obj: JSONObject, sp: SharedPreferences) {
+        val editor = sp.edit()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val entry = obj.optJSONObject(key) ?: continue
+            when (entry.optString("type")) {
+                "bool" -> editor.putBoolean(key, entry.optBoolean("val"))
+                "int" -> editor.putInt(key, entry.optInt("val"))
+                "long" -> editor.putLong(key, entry.optLong("val"))
+                "float" -> editor.putFloat(key, entry.optDouble("val").toFloat())
+                "string" -> editor.putString(key, entry.optString("val"))
+            }
+        }
+        editor.commit()
     }
 }
 

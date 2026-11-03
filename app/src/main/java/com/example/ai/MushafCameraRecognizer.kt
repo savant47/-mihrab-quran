@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.util.Base64
 import android.util.Log
 import com.example.data.OfflineQuranDatabase
 import com.example.data.OfflineVerse
@@ -15,6 +16,7 @@ import com.example.data.SurahInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -37,8 +39,9 @@ data class CameraRecognitionResult(
 
 /**
  * 100% Firebase-free Mushaf Page & Ayah Recognizer.
- * Uses an independent Arabic OCR engine over HTTPS paired with local 6,236-verse
- * Uthmani/normalized text matching, Surah banner detection, and printed page number (1..604) extraction.
+ * Uses a multi-engine Arabic/Auto OCR cascade (OCREngine 2 & 3 with language=auto) over HTTPS
+ * paired with local 6,236-verse Uthmani/normalized text matching, Surah banner detection,
+ * and printed page number (1..604) extraction.
  */
 object MushafCameraRecognizer {
 
@@ -55,6 +58,19 @@ object MushafCameraRecognizer {
         "K81928388988957"
     )
 
+    private data class OcrEngineSpec(
+        val engine: String,
+        val language: String?
+    )
+
+    // OCREngine 2 and 3 natively support Arabic calligraphy via language="auto" without E201 error
+    private val engineSpecs = listOf(
+        OcrEngineSpec(engine = "2", language = "auto"),
+        OcrEngineSpec(engine = "3", language = "auto"),
+        OcrEngineSpec(engine = "2", language = null),
+        OcrEngineSpec(engine = "1", language = "eng")
+    )
+
     suspend fun recognizeMushafPage(
         context: Context,
         bitmap: Bitmap
@@ -62,8 +78,8 @@ object MushafCameraRecognizer {
         try {
             OfflineQuranDatabase.ensureLoaded(context)
 
-            val preparedBitmap = preprocessMushafBitmap(bitmap, maxDimension = 1400)
-            val jpegBytes = compressBitmapToJpegUnderLimit(preparedBitmap, maxBytes = 900 * 1024)
+            val preparedBitmap = preprocessMushafBitmap(bitmap, maxDimension = 1350)
+            val jpegBytes = compressBitmapToJpegUnderLimit(preparedBitmap, maxBytes = 820 * 1024)
 
             val rawOcrText = performIndependentArabicOcr(jpegBytes)
             Log.d(TAG, "Independent OCR extracted text (${rawOcrText.length} chars): ${rawOcrText.take(200)}")
@@ -94,62 +110,76 @@ object MushafCameraRecognizer {
 
     private fun performIndependentArabicOcr(jpegBytes: ByteArray): String {
         var lastError: Exception? = null
+        val base64DataUri = "data:image/jpeg;base64," + Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+        val collectedSnippets = StringBuilder()
 
-        for (apiKey in ocrApiKeys) {
-            try {
-                val requestBody = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("apikey", apiKey)
-                    .addFormDataPart("language", "ara")
-                    .addFormDataPart("isOverlayRequired", "false")
-                    .addFormDataPart("scale", "true")
-                    .addFormDataPart("OCREngine", "1")
-                    .addFormDataPart(
-                        "file",
-                        "mushaf_page.jpg",
-                        jpegBytes.toRequestBody("image/jpeg".toMediaType())
-                    )
-                    .build()
+        for (spec in engineSpecs) {
+            for (apiKey in ocrApiKeys) {
+                try {
+                    val formBuilder = FormBody.Builder()
+                        .add("apikey", apiKey)
+                        .add("base64Image", base64DataUri)
+                        .add("isOverlayRequired", "false")
+                        .add("scale", "true")
+                        .add("detectOrientation", "true")
+                        .add("OCREngine", spec.engine)
 
-                val request = Request.Builder()
-                    .url("https://api.ocr.space/parse/image")
-                    .post(requestBody)
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val bodyStr = response.body?.string().orEmpty()
-                    if (!response.isSuccessful || bodyStr.isBlank()) {
-                        throw IllegalStateException("HTTP ${response.code}")
+                    if (!spec.language.isNullOrBlank()) {
+                        formBuilder.add("language", spec.language)
                     }
 
-                    val json = JSONObject(bodyStr)
-                    val isErrored = json.optBoolean("IsErroredOnProcessing", false)
-                    val parsedResults = json.optJSONArray("ParsedResults")
-                    if (parsedResults != null && parsedResults.length() > 0) {
-                        val sb = StringBuilder()
-                        for (i in 0 until parsedResults.length()) {
-                            val item = parsedResults.optJSONObject(i)
-                            val text = item?.optString("ParsedText", "").orEmpty()
-                            if (text.isNotBlank()) {
-                                sb.append(text).append("\n")
+                    val request = Request.Builder()
+                        .url("https://api.ocr.space/parse/image")
+                        .header("apikey", apiKey)
+                        .post(formBuilder.build())
+                        .build()
+
+                    httpClient.newCall(request).execute().use { response ->
+                        val bodyStr = response.body?.string().orEmpty()
+                        if (!response.isSuccessful || bodyStr.isBlank()) {
+                            throw IllegalStateException("HTTP ${response.code}")
+                        }
+
+                        val json = JSONObject(bodyStr)
+                        val isErrored = json.optBoolean("IsErroredOnProcessing", false)
+                        val parsedResults = json.optJSONArray("ParsedResults")
+                        if (parsedResults != null && parsedResults.length() > 0) {
+                            val sb = StringBuilder()
+                            for (i in 0 until parsedResults.length()) {
+                                val item = parsedResults.optJSONObject(i)
+                                val text = item?.optString("ParsedText", "").orEmpty()
+                                if (text.isNotBlank()) {
+                                    sb.append(text).append("\n")
+                                }
+                            }
+                            val combined = sb.toString().trim()
+                            if (combined.isNotBlank()) {
+                                // Check if we got Arabic letters or valid page digits
+                                val hasArabicChars = combined.any { it in '\u0600'..'\u06FF' }
+                                if (hasArabicChars) {
+                                    return combined
+                                } else {
+                                    collectedSnippets.append(combined).append("\n")
+                                }
                             }
                         }
-                        val combined = sb.toString().trim()
-                        if (combined.isNotBlank()) {
-                            return combined
+
+                        if (isErrored) {
+                            val errArr = json.optJSONArray("ErrorMessage")
+                            val errMsg = errArr?.optString(0) ?: json.optString("ErrorMessage", "OCR processing error")
+                            throw IllegalStateException(errMsg)
                         }
                     }
-
-                    if (isErrored) {
-                        val errArr = json.optJSONArray("ErrorMessage")
-                        val errMsg = errArr?.optString(0) ?: "OCR processing error"
-                        throw IllegalStateException(errMsg)
-                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "OCR attempt (engine=${spec.engine}, lang=${spec.language}) failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                lastError = e
-                Log.w(TAG, "OCR attempt with key failed: ${e.message}")
             }
+        }
+
+        val fallbackText = collectedSnippets.toString().trim()
+        if (fallbackText.isNotBlank()) {
+            return fallbackText
         }
 
         if (lastError != null) {

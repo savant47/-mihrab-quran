@@ -110,10 +110,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.runtime.collectAsState
 import com.example.data.KhatmaMetrics
+import com.example.data.SpiritualMessageItem
+import com.example.data.local.LocalKhatmaStorage
 import com.example.ui.components.AlarmTriggerChip
+import com.example.ui.components.BackupRestoreDialog
+import com.example.ui.components.DoveAndMessageIcon
 import com.example.ui.components.MihrabiLogo
 import com.example.ui.components.MorningEveningAdhkarBox
+import com.example.ui.components.SpiritualStartupMessageDialog
+import com.example.ui.components.shareSpiritualMessage
 import com.example.data.QuranDataHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
@@ -145,6 +155,12 @@ fun MainDashboardScreen(
     onDismissCompletionDialog: () -> Unit
 ) {
     val context = LocalContext.current
+    val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
+    val spiritualMessages by localStorage.spiritualMessagesFlow.collectAsState()
+    var activeStartupMessage by remember { mutableStateOf<SpiritualMessageItem?>(null) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+    var selectedHistorySubTab by remember { mutableIntStateOf(0) } // 0: قراءات المصحف, 1: رسائل وأدعية الفتح
+
     var selectedBottomTab by remember { mutableIntStateOf(0) } // 0: الورد, 1: المصحف, 2: مواقيت الصلاة والقبلة, 3: السجل
     val quranPrefs = remember { context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE) }
     var quranTargetPage by remember { mutableIntStateOf(activeTrack.currentPage) }
@@ -155,6 +171,9 @@ fun MainDashboardScreen(
 
     LaunchedEffect(Unit) {
         com.example.alarm.PrayerTimesAndAdhanManager.scheduleAllFivePrayers(context)
+        localStorage.consumeStartupMessageForSessionIfNeeded()?.let { msg ->
+            activeStartupMessage = msg
+        }
     }
 
     LaunchedEffect(selectedBottomTab, activeTrack) {
@@ -186,7 +205,7 @@ fun MainDashboardScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             MihrabiLogo(
-                                size = 38.dp,
+                                size = 36.dp,
                                 showIntegratedText = false,
                                 animatedGlow = false
                             )
@@ -198,7 +217,7 @@ fun MainDashboardScreen(
                             ) {
                                 Text(
                                     text = "محرابي",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -206,12 +225,56 @@ fun MainDashboardScreen(
                                     text = "إعداد آسر الشربيني | وقف لله تعالى - لا تنسونا من خالص الدعاء لأبي وأمي",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = GoldAccent,
-                                    fontSize = 9.5.sp,
-                                    lineHeight = 13.sp,
+                                    fontSize = 9.sp,
+                                    lineHeight = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 2
                                 )
                             }
+                        }
+                    },
+                    actions = {
+                        // Quick Startup Spiritual Message Button (🕊️✉️)
+                        IconButton(
+                            onClick = {
+                                val latest = spiritualMessages.firstOrNull()
+                                    ?: localStorage.recordNextStartupMessage()
+                                activeStartupMessage = latest
+                            },
+                            modifier = Modifier.testTag("top_spiritual_message_button")
+                        ) {
+                            DoveAndMessageIcon(modifier = Modifier.size(22.dp))
+                        }
+
+                        // Backup & Restore Progress Button
+                        OutlinedButton(
+                            onClick = { showBackupDialog = true },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = RoyalNavyDark,
+                                contentColor = GoldAccent
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .height(34.dp)
+                                .testTag("top_backup_restore_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Backup,
+                                contentDescription = "نسخ احتياطي واستعادة",
+                                tint = GoldAccent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "نسخ احتياطي",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -246,8 +309,8 @@ fun MainDashboardScreen(
                     NavigationBarItem(
                         selected = selectedBottomTab == 3,
                         onClick = { selectedBottomTab = 3 },
-                        icon = { Icon(imageVector = Icons.Default.History, contentDescription = null) },
-                        label = { Text("سجل القراءات", fontSize = 11.sp, maxLines = 1) }
+                        icon = { Icon(imageVector = Icons.Default.History, contentDescription = "السجل") },
+                        label = { Text("السجل", fontSize = 11.sp, maxLines = 1) }
                     )
                 }
             }
@@ -688,151 +751,442 @@ fun MainDashboardScreen(
                 }
 
                 3 -> {
-                    // History Log View
+                    // Unified History View ("السجل"):
+                    // 1) تصفح القراءة في المصحف  2) الرسائل والأدعية التي تظهر عند فتح التطبيق
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(16.dp)
                     ) {
+                        // Top Header + Backup & Restore Shortcut Button
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "سجل الأوراد والتدبر السابقة:",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = GoldAccent,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = RoyalNavyDark,
-                                border = BorderStroke(1.dp, GoldBorder.copy(alpha = 0.5f))
-                            ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${readingLogs.size} تسجيل",
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    text = "السجل الشامل",
+                                    style = MaterialTheme.typography.titleLarge,
                                     color = GoldAccent,
-                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "سجل قراءات المصحف + رسائل وأدعية فتح التطبيق",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Button(
+                                onClick = { showBackupDialog = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = RoyalNavyDark,
+                                    contentColor = GoldAccent
+                                ),
+                                border = BorderStroke(1.dp, GoldAccent),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("history_backup_restore_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Backup,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "نسخ احتياطي / استعادة",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                        // Active Bookmark Quick-Card
-                        Card(
+                        // Segmented Sub-Tab Switcher: [سجل تصفح المصحف] | [سجل الرسائل والأدعية]
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), RoundedCornerShape(14.dp)),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(RoyalNavyDark)
+                                .border(1.dp, GoldBorder, RoundedCornerShape(14.dp))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
+                            val isReadingTab = selectedHistorySubTab == 0
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isReadingTab) EmeraldGreen else androidx.compose.ui.graphics.Color.Transparent,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { selectedHistorySubTab = 0 }
+                                    .testTag("history_subtab_mushaf")
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "نقطة التوقف الحالية في المصحف",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = GoldAccent,
-                                        fontWeight = FontWeight.Bold
+                                Row(
+                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MenuBook,
+                                        contentDescription = null,
+                                        tint = if (isReadingTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        modifier = Modifier.size(16.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "سورة $lastReadSurah • آية $lastReadAyah • صفحة $lastReadPage",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = FontWeight.Bold
+                                        text = "قراءات المصحف (${readingLogs.size})",
+                                        color = if (isReadingTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
-                                Button(
-                                    onClick = {
-                                        quranTargetPage = lastReadPage
-                                        selectedBottomTab = 1
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            }
+
+                            val isMessagesTab = selectedHistorySubTab == 1
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isMessagesTab) EmeraldGreen else androidx.compose.ui.graphics.Color.Transparent,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { selectedHistorySubTab = 1 }
+                                    .testTag("history_subtab_messages")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("متابعة القراءة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    DoveAndMessageIcon(modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "رسائل الفتح (${spiritualMessages.size})",
+                                        color = if (isMessagesTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        if (readingLogs.isEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
+                        if (selectedHistorySubTab == 0) {
+                            // SUB-TAB 0: Mushaf Reading & Stop-Point Logs
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), RoundedCornerShape(14.dp)),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Text(
-                                    text = "لا توجد سجلات قراءة سابقة بعد.",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "نقطة التوقف الحالية في المصحف",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = GoldAccent,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "سورة $lastReadSurah • آية $lastReadAyah • صفحة $lastReadPage",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            quranTargetPage = lastReadPage
+                                            selectedBottomTab = 1
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("متابعة القراءة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
-                        } else {
-                            LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                items(readingLogs) { log ->
-                                    val dateFormatted = remember(log.timestampMillis) {
-                                        try {
-                                            SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(log.timestampMillis))
-                                        } catch (_: Exception) {
-                                            ""
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (readingLogs.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "لا توجد سجلات قراءة سابقة بعد.",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(readingLogs) { log ->
+                                        val dateFormatted = remember(log.timestampMillis) {
+                                            try {
+                                                SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(log.timestampMillis))
+                                            } catch (_: Exception) {
+                                                ""
+                                            }
+                                        }
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .border(0.5.dp, GoldBorder, RoundedCornerShape(14.dp)),
+                                            shape = RoundedCornerShape(14.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Column(modifier = Modifier.padding(14.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "سورة ${log.surah} - آية ${log.ayah}",
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = EmeraldGreen
+                                                    )
+                                                    Text(
+                                                        text = "+${log.pagesReadToday} صفحة",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = GoldAccent
+                                                    )
+                                                }
+                                                if (dateFormatted.isNotBlank()) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = dateFormatted,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    text = log.reflectionSummary,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 4,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                     }
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .border(0.5.dp, GoldBorder, RoundedCornerShape(14.dp)),
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                    ) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
+                                }
+                            }
+                        } else {
+                            // SUB-TAB 1: Startup Spiritual Messages History (رسائل وأدعية فتح التطبيق)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "اضغط على أي رسالة لإعادة فتحها أو مشاركتها:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        val nextMsg = localStorage.recordNextStartupMessage()
+                                        activeStartupMessage = nextMsg
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "رسالة جديدة الآن",
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            if (spiritualMessages.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "لا توجد رسائل محفوظة بعد.",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(spiritualMessages) { msg ->
+                                        val msgDate = remember(msg.timestampMillis) {
+                                            try {
+                                                SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(msg.timestampMillis))
+                                            } catch (_: Exception) {
+                                                ""
+                                            }
+                                        }
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .border(
+                                                    width = if (msg.isRead) 0.7.dp else 1.4.dp,
+                                                    color = if (msg.isRead) GoldBorder else GoldAccent,
+                                                    shape = RoundedCornerShape(16.dp)
+                                                )
+                                                .clickable { activeStartupMessage = msg },
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Column(modifier = Modifier.padding(14.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        DoveAndMessageIcon(modifier = Modifier.size(18.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = "رسالة من مطور التطبيق 🕊️✉️",
+                                                            fontSize = 11.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = GoldAccent
+                                                        )
+                                                    }
+
+                                                    Surface(
+                                                        shape = RoundedCornerShape(50),
+                                                        color = if (msg.isRead)
+                                                            EmeraldGreen.copy(alpha = 0.16f)
+                                                        else
+                                                            RoyalNavyDark,
+                                                        border = BorderStroke(
+                                                            0.8.dp,
+                                                            if (msg.isRead) EmeraldGreen else GoldAccent
+                                                        )
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (msg.isRead) Icons.Default.DoneAll else Icons.Default.MarkEmailRead,
+                                                                contentDescription = null,
+                                                                tint = if (msg.isRead) EmeraldGreen else GoldAccent,
+                                                                modifier = Modifier.size(12.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Text(
+                                                                text = if (msg.isRead) "تمت القراءة" else "اضغط للقراءة",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = if (msg.isRead) EmeraldGreen else GoldAccent
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(6.dp))
+
                                                 Text(
-                                                    text = "سورة ${log.surah} - آية ${log.ayah}",
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
+                                                    text = msg.categoryTitle,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
                                                     color = EmeraldGreen
                                                 )
+
+                                                Spacer(modifier = Modifier.height(6.dp))
+
                                                 Text(
-                                                    text = "+${log.pagesReadToday} صفحة",
+                                                    text = msg.arabicText,
                                                     style = MaterialTheme.typography.bodyMedium,
-                                                    color = GoldAccent
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 3,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
+
+                                                Spacer(modifier = Modifier.height(8.dp))
+
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = msg.sourceReference,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = GoldAccent
+                                                        )
+                                                        if (msgDate.isNotBlank()) {
+                                                            Text(
+                                                                text = msgDate,
+                                                                fontSize = 10.sp,
+                                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        OutlinedButton(
+                                                            onClick = { activeStartupMessage = msg },
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            border = BorderStroke(0.8.dp, GoldAccent),
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                            modifier = Modifier.height(32.dp)
+                                                        ) {
+                                                            Text("فتح الرسالة", fontSize = 11.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = { shareSpiritualMessage(context, msg) },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Share,
+                                                                contentDescription = "مشاركة الرسالة",
+                                                                tint = EmeraldGreen,
+                                                                modifier = Modifier.size(17.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            if (dateFormatted.isNotBlank()) {
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = dateFormatted,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                                    fontSize = 11.sp
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Text(
-                                                text = log.reflectionSummary,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 4,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
                                         }
                                     }
                                 }
@@ -842,6 +1196,42 @@ fun MainDashboardScreen(
                 }
             }
         }
+    }
+
+    // Ornate Historical Startup Spiritual Message Dialog (On App Open or Re-opened from "السجل")
+    activeStartupMessage?.let { currentMsg ->
+        SpiritualStartupMessageDialog(
+            message = currentMsg,
+            onMarkReadAndClose = {
+                localStorage.markStartupMessageAsRead(currentMsg.id)
+                activeStartupMessage = null
+            },
+            onShare = {
+                localStorage.markStartupMessageAsRead(currentMsg.id)
+                shareSpiritualMessage(context, currentMsg)
+            },
+            onDismissClose = {
+                activeStartupMessage = null
+            }
+        )
+    }
+
+    // Full Local Backup & Restore Dialog
+    if (showBackupDialog) {
+        BackupRestoreDialog(
+            tracksCount = tracks.size,
+            logsCount = readingLogs.size,
+            currentSurah = activeTrack.currentSurah,
+            currentPage = activeTrack.currentPage,
+            onDismiss = { showBackupDialog = false },
+            onRestoredSuccess = {
+                val refreshedTrack = localStorage.tracksFlow.value.firstOrNull() ?: activeTrack
+                lastReadPage = refreshedTrack.currentPage
+                lastReadSurah = refreshedTrack.currentSurah
+                lastReadAyah = refreshedTrack.currentAyah
+                quranTargetPage = refreshedTrack.currentPage
+            }
+        )
     }
 
     if (showCompletionDialog) {
@@ -1166,7 +1556,7 @@ private fun StopPointInputDialog(
                         Text(
                             text = "صوّر صفحة المصحف التي وقفت عندها وسيتم التعرف تلقائياً على رقم الصفحة والسورة والآية.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            color = androidx.compose.ui.graphics.Color(0xFFFDF8EE).copy(alpha = 0.9f),
                             textAlign = TextAlign.Center,
                             fontSize = 11.sp
                         )

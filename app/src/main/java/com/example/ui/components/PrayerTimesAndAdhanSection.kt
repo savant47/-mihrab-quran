@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,7 +26,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +47,8 @@ import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
 import com.example.ui.theme.RoyalNavyDark
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun PrayerTimesAndAdhanCard(
@@ -252,114 +260,106 @@ fun PrayerTimesAndAdhanCard(
                 }
             }
 
-            // Next Prayer Banner
+            // Next Prayer Banner (Fixed horizontal layout so clock pill never wraps vertically)
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = RoyalNavyDark,
-                border = BorderStroke(1.dp, GoldAccent.copy(alpha = 0.5f)),
+                border = BorderStroke(1.2.dp, GoldAccent.copy(alpha = 0.7f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "الصلاة القادمة: ${nextPrayerSlot.prayer.iconEmoji} أذان ${nextPrayerSlot.prayer.arabicName}",
                             color = GoldAccent,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = "$remainingText • (${nextPrayerSlot.alertMode.titleAr})",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.sp
+                            color = Color(0xFFFDF8EE).copy(alpha = 0.88f),
+                            fontSize = 11.5.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = EmeraldGreen
+                        shape = RoundedCornerShape(12.dp),
+                        color = EmeraldGreen,
+                        border = BorderStroke(1.dp, GoldAccent.copy(alpha = 0.75f))
                     ) {
-                        Text(
-                            text = nextPrayerSlot.formatted12Hour(),
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = nextPrayerSlot.formatted12Hour(),
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.5.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
             }
 
-            // 5 Daily Prayers Interactive Grid
-            Row(
+            // 5 Daily Prayers Expressive Time-of-Day Sky Showcase (3 Top + 2 Bottom)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                prayerSlots.forEach { slot ->
-                    val isNext = slot.prayer == nextPrayerSlot.prayer
-                    val isOff = slot.alertMode == AdhanAlertMode.OFF
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = when {
-                            isNext -> EmeraldGreen.copy(alpha = 0.18f)
-                            isOff -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
-                            else -> RoyalNavyDark.copy(alpha = 0.45f)
-                        },
-                        border = BorderStroke(
-                            width = if (isNext) 1.5.dp else 0.8.dp,
-                            color = when {
-                                isNext -> EmeraldGreen
-                                isOff -> Color.Gray.copy(alpha = 0.3f)
-                                else -> GoldBorder
-                            }
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    prayerSlots.take(3).forEach { slot ->
+                        PrayerAtmosphericCard(
+                            slot = slot,
+                            isNext = slot.prayer == nextPrayerSlot.prayer,
+                            onClick = {
                                 selectedPrayerForEdit = slot.prayer
                                 showSettingsDialog = true
-                            }
-                            .testTag("prayer_slot_${slot.prayer.id}")
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = slot.prayer.arabicName,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = if (isNext) EmeraldGreen else GoldAccent
-                            )
-                            Text(
-                                text = slot.formatted12Hour(),
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1
-                            )
-                            Icon(
-                                imageVector = when (slot.alertMode) {
-                                    AdhanAlertMode.FULL_ADHAN -> Icons.Default.VolumeUp
-                                    AdhanAlertMode.SHORT_ADHAN -> Icons.Default.VolumeDown
-                                    AdhanAlertMode.NOTIFICATION_ONLY -> Icons.Default.Notifications
-                                    AdhanAlertMode.CUSTOM_UPLOADED -> Icons.Default.AudioFile
-                                    AdhanAlertMode.ISLAMIC_NASHEED -> Icons.Default.MusicNote
-                                    AdhanAlertMode.OFF -> Icons.Default.VolumeOff
-                                },
-                                contentDescription = slot.alertMode.titleAr,
-                                tint = if (isOff) Color.Gray else if (isNext) EmeraldGreen else GoldAccent,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("prayer_slot_${slot.prayer.id}")
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    prayerSlots.drop(3).forEach { slot ->
+                        PrayerAtmosphericCard(
+                            slot = slot,
+                            isNext = slot.prayer == nextPrayerSlot.prayer,
+                            onClick = {
+                                selectedPrayerForEdit = slot.prayer
+                                showSettingsDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("prayer_slot_${slot.prayer.id}")
+                        )
                     }
                 }
             }
@@ -902,3 +902,285 @@ private fun AdhanSettingsDialog(
         }
     }
 }
+
+/**
+ * Expressive Time-of-Day Sky Card for each of the 5 Daily Prayers:
+ * - الفجر (Fajr): Rose-violet dawn horizon with rising morning sun & dawn star.
+ * - الظهر (Dhuhr): Radiant azure midday sky with high golden sun & rays.
+ * - العصر (Asr): Warm amber-gold afternoon sky with descending golden sun.
+ * - المغرب (Maghrib): Crimson-purple sunset horizon with sun dipping below horizon.
+ * - العشاء (Isha): Deep indigo starry night sky with luminous golden crescent moon.
+ */
+@Composable
+private fun PrayerAtmosphericCard(
+    slot: PrayerTimeSlot,
+    isNext: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isOff = slot.alertMode == AdhanAlertMode.OFF
+
+    val skyGradientColors = remember(slot.prayer) {
+        when (slot.prayer) {
+            PrayerKey.FAJR -> listOf(
+                Color(0xFF1A1F4A),
+                Color(0xFF5D3A6A),
+                Color(0xFFE69168)
+            )
+            PrayerKey.DHUHR -> listOf(
+                Color(0xFF0A4B78),
+                Color(0xFF1976D2),
+                Color(0xFF56CCF2)
+            )
+            PrayerKey.ASR -> listOf(
+                Color(0xFF6B2D14),
+                Color(0xFFC2641E),
+                Color(0xFFF0B44C)
+            )
+            PrayerKey.MAGHRIB -> listOf(
+                Color(0xFF241138),
+                Color(0xFF8C284E),
+                Color(0xFFE86A48)
+            )
+            PrayerKey.ISHA -> listOf(
+                Color(0xFF060B18),
+                Color(0xFF0F1E3D),
+                Color(0xFF1B335F)
+            )
+        }
+    }
+
+    val borderColor = when {
+        isNext -> Color(0xFF4ADE80)
+        isOff -> Color.White.copy(alpha = 0.25f)
+        else -> GoldAccent.copy(alpha = 0.7f)
+    }
+
+    Box(
+        modifier = modifier
+            .height(114.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.verticalGradient(skyGradientColors))
+            .border(
+                width = if (isNext) 2.dp else 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable { onClick() }
+    ) {
+        // Custom Canvas Sky & Celestial Art (Sun / Horizon / Crescent Moon & Stars)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+
+            when (slot.prayer) {
+                PrayerKey.FAJR -> {
+                    // Dawn horizon silhouette + rising morning sun + dawn star
+                    val sunCenter = Offset(w * 0.5f, h * 0.64f)
+                    val sunRadius = 15.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFFFFE082).copy(alpha = 0.28f),
+                        radius = sunRadius * 1.7f,
+                        center = sunCenter
+                    )
+                    drawCircle(
+                        color = Color(0xFFFFD54F),
+                        radius = sunRadius,
+                        center = sunCenter
+                    )
+                    // Horizon glow line
+                    drawLine(
+                        color = Color(0xFFFFCC80).copy(alpha = 0.65f),
+                        start = Offset(w * 0.12f, h * 0.68f),
+                        end = Offset(w * 0.88f, h * 0.68f),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                    // Morning star in upper sky
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.85f),
+                        radius = 2.2.dp.toPx(),
+                        center = Offset(w * 0.22f, h * 0.24f)
+                    )
+                }
+
+                PrayerKey.DHUHR -> {
+                    // Bright Zenith Midday Sun with 8 golden rays
+                    val sunCenter = Offset(w * 0.5f, h * 0.48f)
+                    val sunRadius = 14.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFFFFF59D).copy(alpha = 0.30f),
+                        radius = sunRadius * 1.85f,
+                        center = sunCenter
+                    )
+                    for (deg in 0 until 360 step 45) {
+                        val rad = Math.toRadians(deg.toDouble())
+                        val rStart = sunRadius * 1.2f
+                        val rEnd = sunRadius * 1.65f
+                        drawLine(
+                            color = Color(0xFFFFEE58).copy(alpha = 0.85f),
+                            start = Offset(
+                                (sunCenter.x + cos(rad) * rStart).toFloat(),
+                                (sunCenter.y + sin(rad) * rStart).toFloat()
+                            ),
+                            end = Offset(
+                                (sunCenter.x + cos(rad) * rEnd).toFloat(),
+                                (sunCenter.y + sin(rad) * rEnd).toFloat()
+                            ),
+                            strokeWidth = 1.8.dp.toPx()
+                        )
+                    }
+                    drawCircle(
+                        color = Color(0xFFFFF176),
+                        radius = sunRadius,
+                        center = sunCenter
+                    )
+                }
+
+                PrayerKey.ASR -> {
+                    // Warm Golden Afternoon Sun tilted slightly toward horizon
+                    val sunCenter = Offset(w * 0.55f, h * 0.54f)
+                    val sunRadius = 15.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFFFFCC80).copy(alpha = 0.32f),
+                        radius = sunRadius * 1.75f,
+                        center = sunCenter
+                    )
+                    drawCircle(
+                        color = Color(0xFFFFB74D),
+                        radius = sunRadius,
+                        center = sunCenter
+                    )
+                    // Soft warm cloud bands
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.35f),
+                        start = Offset(w * 0.18f, h * 0.58f),
+                        end = Offset(w * 0.48f, h * 0.58f),
+                        strokeWidth = 3.dp.toPx()
+                    )
+                }
+
+                PrayerKey.MAGHRIB -> {
+                    // Sunset crimson sun dipping below the horizon line
+                    val horizonY = h * 0.64f
+                    val sunCenter = Offset(w * 0.5f, horizonY)
+                    val sunRadius = 16.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFFFF8A65).copy(alpha = 0.32f),
+                        radius = sunRadius * 1.7f,
+                        center = sunCenter
+                    )
+                    drawArc(
+                        color = Color(0xFFFFAB40),
+                        startAngle = 180f,
+                        sweepAngle = 180f,
+                        useCenter = true,
+                        topLeft = Offset(sunCenter.x - sunRadius, sunCenter.y - sunRadius),
+                        size = Size(sunRadius * 2, sunRadius * 2)
+                    )
+                    // Sunset horizon line
+                    drawLine(
+                        color = Color(0xFFFFCC80).copy(alpha = 0.8f),
+                        start = Offset(w * 0.10f, horizonY),
+                        end = Offset(w * 0.90f, horizonY),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+
+                PrayerKey.ISHA -> {
+                    // Starry night sky with golden Crescent Moon
+                    val moonCenter = Offset(w * 0.52f, h * 0.48f)
+                    val moonR = 13.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFFFFE082).copy(alpha = 0.22f),
+                        radius = moonR * 1.65f,
+                        center = moonCenter
+                    )
+                    drawCircle(
+                        color = Color(0xFFFFD54F),
+                        radius = moonR,
+                        center = moonCenter
+                    )
+                    // Cutout circle to form crescent moon
+                    drawCircle(
+                        color = Color(0xFF0E1B38),
+                        radius = moonR * 0.85f,
+                        center = Offset(moonCenter.x - moonR * 0.42f, moonCenter.y - moonR * 0.22f)
+                    )
+                    // Twinkling stars
+                    drawCircle(Color.White.copy(alpha = 0.85f), radius = 1.8.dp.toPx(), center = Offset(w * 0.22f, h * 0.30f))
+                    drawCircle(Color.White.copy(alpha = 0.70f), radius = 1.4.dp.toPx(), center = Offset(w * 0.78f, h * 0.28f))
+                    drawCircle(Color(0xFFFFE082).copy(alpha = 0.85f), radius = 1.9.dp.toPx(), center = Offset(w * 0.30f, h * 0.56f))
+                    drawCircle(Color.White.copy(alpha = 0.75f), radius = 1.5.dp.toPx(), center = Offset(w * 0.75f, h * 0.54f))
+                }
+            }
+        }
+
+        // Top-to-bottom subtle dark scrim at edges so text and clock are ultra-legible
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Row: Prayer Name + Sound/Notification Status Icon
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = slot.prayer.arabicName,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp,
+                    color = Color.White,
+                    maxLines = 1
+                )
+
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.38f)
+                ) {
+                    Icon(
+                        imageVector = when (slot.alertMode) {
+                            AdhanAlertMode.FULL_ADHAN -> Icons.Default.VolumeUp
+                            AdhanAlertMode.SHORT_ADHAN -> Icons.Default.VolumeDown
+                            AdhanAlertMode.NOTIFICATION_ONLY -> Icons.Default.Notifications
+                            AdhanAlertMode.CUSTOM_UPLOADED -> Icons.Default.AudioFile
+                            AdhanAlertMode.ISLAMIC_NASHEED -> Icons.Default.MusicNote
+                            AdhanAlertMode.OFF -> Icons.Default.VolumeOff
+                        },
+                        contentDescription = slot.alertMode.titleAr,
+                        tint = if (isOff) Color.LightGray else if (isNext) Color(0xFF4ADE80) else GoldAccent,
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .size(14.dp)
+                    )
+                }
+            }
+
+            // Bottom Horizontal Clock Pill (Guaranteed single-line display)
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isNext) EmeraldGreen.copy(alpha = 0.92f) else Color(0xFF0B1426).copy(alpha = 0.78f),
+                border = BorderStroke(
+                    width = 0.9.dp,
+                    color = if (isNext) Color(0xFF4ADE80) else GoldAccent.copy(alpha = 0.7f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = slot.formatted12Hour(),
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 12.5.sp,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
