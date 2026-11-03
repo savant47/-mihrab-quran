@@ -429,35 +429,6 @@ fun MainDashboardScreen(
                                     }
                                 }
                             }
-
-                            item {
-                                Card(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable { showCreateTrackDialog = true }
-                                        .border(1.dp, EmeraldGreen, RoundedCornerShape(20.dp)),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = null,
-                                            tint = EmeraldGreen,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "+ إضافة ورد",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = EmeraldGreen
-                                        )
-                                    }
-                                }
-                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
