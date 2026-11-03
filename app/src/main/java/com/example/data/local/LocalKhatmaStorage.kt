@@ -329,4 +329,44 @@ class LocalKhatmaStorage private constructor(context: Context) {
             )
         )
     }
+
+    /**
+     * Silently updates the stop-point (Surah, Ayah, Page) of a track when the user flips pages
+     * or exits the Mushaf without pressing the manual Save button.
+     */
+    fun updateTrackCheckpointSilently(
+        trackId: String,
+        surah: String,
+        ayah: Int,
+        page: Int
+    ) {
+        val clampedPage = page.coerceIn(1, QuranDataHelper.TOTAL_PAGES)
+        val rubCount = QuranDataHelper.pageToRub(clampedPage)
+        val progressPercentage = (clampedPage.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
+
+        val currentTracks = loadTracks().toMutableList()
+        val activeIndex = currentTracks.indexOfFirst { it.trackId == trackId }
+        if (activeIndex >= 0) {
+            currentTracks[activeIndex] = currentTracks[activeIndex].copy(
+                currentSurah = surah,
+                currentAyah = ayah,
+                currentPage = clampedPage,
+                completedRubCount = rubCount,
+                progressPercentage = progressPercentage,
+                isCompleted = clampedPage >= QuranDataHelper.TOTAL_PAGES
+            )
+            saveTracks(currentTracks)
+        }
+
+        val currentUser = loadGuestUser()
+        saveGuestUser(
+            currentUser.copy(
+                currentSurah = surah,
+                currentAyah = ayah,
+                currentPage = clampedPage,
+                completedRubCount = rubCount,
+                progressPercentage = progressPercentage
+            )
+        )
+    }
 }

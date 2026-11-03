@@ -318,6 +318,53 @@ object MihrabiAlarmManager {
         }
     }
 
+    fun playRawOrUriAudio(
+        context: Context,
+        rawResId: Int,
+        customUri: String = "",
+        durationMillis: Long = 165_000L
+    ) {
+        stopRingtone()
+        try {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+
+            val player = if (customUri.isNotBlank()) {
+                MediaPlayer().apply {
+                    setAudioAttributes(audioAttributes)
+                    setDataSource(context.applicationContext, Uri.parse(customUri))
+                    prepare()
+                }
+            } else {
+                MediaPlayer.create(context.applicationContext, rawResId)
+            }
+
+            if (player != null) {
+                activeMediaPlayer = player
+                player.isLooping = false
+                player.start()
+
+                val runnable = Runnable { stopRingtone() }
+                stopRunnable = runnable
+                mainHandler.postDelayed(runnable, durationMillis)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play custom Adhan URI, falling back to raw resource", e)
+            try {
+                val fallback = MediaPlayer.create(context.applicationContext, rawResId)
+                activeMediaPlayer = fallback
+                fallback?.start()
+                val runnable = Runnable { stopRingtone() }
+                stopRunnable = runnable
+                mainHandler.postDelayed(runnable, durationMillis)
+            } catch (ex: Exception) {
+                Log.e(TAG, "Fallback raw player failed", ex)
+            }
+        }
+    }
+
     fun stopRingtone() {
         stopRunnable?.let { mainHandler.removeCallbacks(it) }
         stopRunnable = null
@@ -368,6 +415,7 @@ class MihrabiAlarmReceiver : BroadcastReceiver() {
 
         if (action == Intent.ACTION_BOOT_COMPLETED) {
             MihrabiAlarmManager.rescheduleAllEnabledAlarms(context)
+            PrayerTimesAndAdhanManager.scheduleAllFivePrayers(context)
             return
         }
 
@@ -376,6 +424,11 @@ class MihrabiAlarmReceiver : BroadcastReceiver() {
             val notifId = intent.getIntExtra("notifId", 1001)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.cancel(notifId)
+            return
+        }
+
+        if (action == PrayerTimesAndAdhanManager.ACTION_TRIGGER_PRAYER_ADHAN) {
+            PrayerTimesAndAdhanManager.handleTriggeredAdhanBroadcast(context, intent)
             return
         }
 

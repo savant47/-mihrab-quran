@@ -4,31 +4,19 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -39,58 +27,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.FormatSize
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.NavigateBefore
-import androidx.compose.material.icons.filled.NavigateNext
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.ViewAgenda
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,6 +47,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audio.QuranAudioPlayerManager
+import com.example.audio.QuranReciter
 import com.example.data.OfflineQuranDatabase
 import com.example.data.OfflineVerse
 import com.example.data.QuranDataHelper
@@ -146,12 +87,19 @@ fun QuranReaderScreen(
     initialPage: Int,
     isFullScreen: Boolean = false,
     onToggleFullScreen: (Boolean) -> Unit = {},
+    onAutoSaveStopBookmark: (surahName: String, ayahNumber: Int, pageNumber: Int) -> Unit = { _, _, _ -> },
     onSaveStopBookmark: (surahName: String, ayahNumber: Int, pageNumber: Int) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val quranPrefs = remember { context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE) }
     val quranRepository = remember { QuranRepository(context) }
+
+    val audioPlaybackState by QuranAudioPlayerManager.playbackState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        QuranAudioPlayerManager.initPreferences(context)
+    }
 
     val savedLastPage = remember(activeTrackId) {
         quranPrefs.getInt("last_viewed_page_$activeTrackId", initialPage.coerceIn(1, 604)).coerceIn(1, 604)
@@ -182,7 +130,12 @@ fun QuranReaderScreen(
         mutableStateOf(quranPrefs.getBoolean("ayah_by_ayah_mode", false))
     }
     var fontScaleSp by remember {
-        mutableFloatStateOf(quranPrefs.getFloat("mushaf_font_size_sp", 24f).coerceIn(18f, 36f))
+        mutableFloatStateOf(quranPrefs.getFloat("mushaf_font_size_sp_v2", 28f).coerceIn(20f, 38f))
+    }
+
+    // Exit Full-Screen mode when user presses Back button
+    BackHandler(enabled = isFullScreen) {
+        onToggleFullScreen(false)
     }
 
     // Track current stop bookmark (Surah & Ayah)
@@ -218,8 +171,11 @@ fun QuranReaderScreen(
         return added
     }
 
-    // Currently tapped verse for bottom sheet Tafsir & controls
+    // Floating Mini Popover above tapped Ayah (Play ▶️, Tafsir 🔎, Reciter/Repeat ⚙️, Stop Bookmark 🔖)
+    var floatingPopoverVerse by remember { mutableStateOf<OfflineVerse?>(null) }
+    // Full Tafsir Al-Muyassar Bottom Sheet (opened when user clicks 🔎 in the floating popover)
     var selectedVerseForSheet by remember { mutableStateOf<OfflineVerse?>(null) }
+    var showAudioSettingsDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showSurahIndexDialog by remember { mutableStateOf(false) }
 
@@ -227,6 +183,16 @@ fun QuranReaderScreen(
     LaunchedEffect(initialPage) {
         if (initialPage in 1..604 && initialPage != currentPage) {
             pagerState.scrollToPage(initialPage - 1)
+        }
+    }
+
+    // When audio player advances to an Ayah on a different page, scroll pager automatically
+    LaunchedEffect(audioPlaybackState.currentPage, audioPlaybackState.isPlaying) {
+        if (audioPlaybackState.isPlaying && !audioPlaybackState.isFullSurahMode) {
+            val targetP = audioPlaybackState.currentPage.coerceIn(1, 604)
+            if (targetP != currentPage) {
+                pagerState.animateScrollToPage(targetP - 1)
+            }
         }
     }
 
@@ -248,19 +214,48 @@ fun QuranReaderScreen(
         currentPageVerses.firstOrNull()?.juz ?: (((currentPage - 1) / 20) + 1).coerceIn(1, 30)
     }
 
-    // Persist last viewed page automatically
-    LaunchedEffect(currentPage, currentSurahInfo, activeTrackId) {
-        val firstAyahOnPage = currentPageVerses.firstOrNull()?.ayahNumber ?: 1
+    // Helper that silently saves the current reading stop-point automatically
+    fun persistAutoStopPoint(surahName: String, ayahNumber: Int, pageNumber: Int) {
+        bookmarkedSurah = surahName
+        bookmarkedAyah = ayahNumber
+        bookmarkedPage = pageNumber
         quranPrefs.edit()
-            .putInt("last_viewed_page_$activeTrackId", currentPage)
-            .putInt("last_viewed_page", currentPage)
+            .putInt("last_viewed_page_$activeTrackId", pageNumber)
+            .putInt("last_viewed_page", pageNumber)
+            .putInt("last_read_page_$activeTrackId", pageNumber)
+            .putString("last_read_surah_$activeTrackId", surahName)
+            .putInt("last_read_ayah_$activeTrackId", ayahNumber)
+            .putInt("last_read_page", pageNumber)
+            .putString("last_read_surah", surahName)
+            .putInt("last_read_ayah", ayahNumber)
             .apply()
-        if (!quranPrefs.contains("last_read_page_$activeTrackId")) {
-            quranPrefs.edit()
-                .putInt("last_read_page_$activeTrackId", currentPage)
-                .putString("last_read_surah_$activeTrackId", currentSurahInfo.nameArabic)
-                .putInt("last_read_ayah_$activeTrackId", firstAyahOnPage)
-                .apply()
+        onAutoSaveStopBookmark(surahName, ayahNumber, pageNumber)
+    }
+
+    // Automatically save stop-point whenever user flips pages or taps a verse
+    LaunchedEffect(currentPage, currentSurahInfo, floatingPopoverVerse, activeTrackId) {
+        if (isDatabaseReady) {
+            val targetVerse = floatingPopoverVerse?.takeIf { it.page == currentPage }
+                ?: currentPageVerses.firstOrNull()
+            val sName = targetVerse?.surahNameAr ?: currentSurahInfo.nameArabic
+            val aNum = targetVerse?.ayahNumber ?: 1
+            persistAutoStopPoint(sName, aNum, currentPage)
+        }
+    }
+
+    // Also guarantee auto-save when the user exits the Mushaf screen without pressing Save
+    val latestPageRef by rememberUpdatedState(currentPage)
+    val latestSurahRef by rememberUpdatedState(
+        floatingPopoverVerse?.takeIf { it.page == currentPage }?.surahNameAr ?: currentSurahInfo.nameArabic
+    )
+    val latestAyahRef by rememberUpdatedState(
+        floatingPopoverVerse?.takeIf { it.page == currentPage }?.ayahNumber
+            ?: (currentPageVerses.firstOrNull()?.ayahNumber ?: 1)
+    )
+
+    DisposableEffect(activeTrackId) {
+        onDispose {
+            persistAutoStopPoint(latestSurahRef, latestAyahRef, latestPageRef)
         }
     }
 
@@ -341,10 +336,10 @@ fun QuranReaderScreen(
                                         fontSize = 15.sp
                                     )
                                     Text(
-                                        text = "صفحة $currentPage من 604 • الجزء $currentJuz",
+                                        text = "صفحة $currentPage من 604 • الجزء $currentJuz (حفظ تلقائي ✓)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = EmeraldGreen,
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -368,26 +363,15 @@ fun QuranReaderScreen(
                                 }
                             }
 
-                            // Save Stop Bookmark Button
+                            // Save Stop Bookmark Button (also logs reflection)
                             Button(
                                 onClick = {
-                                    val targetVerse = selectedVerseForSheet
+                                    val targetVerse = floatingPopoverVerse
+                                        ?: selectedVerseForSheet
                                         ?: currentPageVerses.lastOrNull()
                                     val sName = targetVerse?.surahNameAr ?: currentSurahInfo.nameArabic
                                     val aNum = targetVerse?.ayahNumber ?: 1
-                                    bookmarkedSurah = sName
-                                    bookmarkedAyah = aNum
-                                    bookmarkedPage = currentPage
-
-                                    quranPrefs.edit()
-                                        .putInt("last_read_page_$activeTrackId", currentPage)
-                                        .putString("last_read_surah_$activeTrackId", sName)
-                                        .putInt("last_read_ayah_$activeTrackId", aNum)
-                                        .putInt("last_read_page", currentPage)
-                                        .putString("last_read_surah", sName)
-                                        .putInt("last_read_ayah", aNum)
-                                        .apply()
-
+                                    persistAutoStopPoint(sName, aNum, currentPage)
                                     onSaveStopBookmark(sName, aNum, currentPage)
                                     Toast.makeText(
                                         context,
@@ -422,56 +406,86 @@ fun QuranReaderScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Row 2: Quick Action Toolbar (Full Screen, Index, Search, Display Mode, Font Size, Theme)
+                        // Row 2: Quick Action Toolbar (Index, Search, Audio Reciter Settings, Display Mode, Font, Theme)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Surah Index Button
-                            OutlinedButton(
-                                onClick = { showSurahIndexDialog = true },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, GoldBorder),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.List,
-                                    contentDescription = "فهرس السور",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "فهرس السور",
-                                    fontSize = 12.sp,
-                                    color = GoldAccent,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Surah Index Button
+                                OutlinedButton(
+                                    onClick = { showSurahIndexDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, GoldBorder),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.List,
+                                        contentDescription = "فهرس السور",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "الفهرس",
+                                        fontSize = 11.5.sp,
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
 
-                            // Search Ayahs Offline Button
-                            OutlinedButton(
-                                onClick = { showSearchDialog = true },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, GoldBorder),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "بحث في المصحف",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "بحث بالآيات",
-                                    fontSize = 12.sp,
-                                    color = GoldAccent,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                // Search Ayahs Offline Button
+                                OutlinedButton(
+                                    onClick = { showSearchDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, GoldBorder),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "بحث في المصحف",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "بحث",
+                                        fontSize = 11.5.sp,
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                // Audio & Reciter Settings Button (mp3quran.net)
+                                OutlinedButton(
+                                    onClick = { showAudioSettingsDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, EmeraldGreen),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = EmeraldGreen.copy(alpha = 0.12f)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("open_quran_audio_settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Headphones,
+                                        contentDescription = "إعدادات القارئ والتكرار",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "القارئ والتكرار",
+                                        fontSize = 11.5.sp,
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -481,13 +495,13 @@ fun QuranReaderScreen(
                                         isAyahByAyahMode = !isAyahByAyahMode
                                         quranPrefs.edit().putBoolean("ayah_by_ayah_mode", isAyahByAyahMode).apply()
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isAyahByAyahMode) Icons.Default.MenuBook else Icons.Default.ViewAgenda,
                                         contentDescription = "تبديل طريقة العرض",
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
 
@@ -495,20 +509,20 @@ fun QuranReaderScreen(
                                 IconButton(
                                     onClick = {
                                         fontScaleSp = when {
-                                            fontScaleSp < 23f -> 24f
-                                            fontScaleSp < 27f -> 28f
-                                            fontScaleSp < 31f -> 32f
-                                            else -> 20f
+                                            fontScaleSp < 26f -> 28f
+                                            fontScaleSp < 30f -> 31f
+                                            fontScaleSp < 33f -> 34f
+                                            else -> 24f
                                         }
-                                        quranPrefs.edit().putFloat("mushaf_font_size_sp", fontScaleSp).apply()
+                                        quranPrefs.edit().putFloat("mushaf_font_size_sp_v2", fontScaleSp).apply()
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.FormatSize,
                                         contentDescription = "حجم الخط",
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
 
@@ -518,13 +532,13 @@ fun QuranReaderScreen(
                                         isNightMushafMode = !isNightMushafMode
                                         quranPrefs.edit().putBoolean("night_mushaf_mode", isNightMushafMode).apply()
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isNightMushafMode) Icons.Default.LightMode else Icons.Default.DarkMode,
                                         contentDescription = "الوضع الليلي للمصحف",
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -565,115 +579,362 @@ fun QuranReaderScreen(
                 }
             }
 
-            // Full-Screen Floating Mini Header (Only shown when in Full-Screen Mode)
+            // FLOATING ACTION POPOVER BOX ABOVE TAPPED AYAH ("مربع صغير طائف أعلى الآية")
+            // Shows: ▶️ Play Online Audio (mp3quran.net), 🔎 Offline Tafsir Al-Muyassar, ⚙️ Reciter & Repeat, 🔖 Stop Bookmark
             AnimatedVisibility(
-                visible = isFullScreen,
-                enter = fadeIn(),
-                exit = fadeOut()
+                visible = floatingPopoverVerse != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                Surface(
-                    color = RoyalNavyDark.copy(alpha = 0.94f),
-                    border = BorderStroke(0.5.dp, GoldBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
+                floatingPopoverVerse?.let { tappedVerse ->
+                    val isThisVersePlaying = audioPlaybackState.isPlaying &&
+                            audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
+                            audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber &&
+                            !audioPlaybackState.isFullSurahMode
+                    val isThisVerseLoading = audioPlaybackState.isLoading &&
+                            audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
+                            audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber
+                    val isMemorized = memorizedAyahKeys.contains("${tappedVerse.surahNumber}:${tappedVerse.ayahNumber}")
+
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .border(1.5.dp, GoldAccent, RoundedCornerShape(16.dp))
+                            .testTag("floating_ayah_popover_box"),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = RoyalNavyDark),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(
-                                onClick = { onToggleFullScreen(false) },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, GoldAccent),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = RoyalNavyDark,
-                                    contentColor = GoldAccent
-                                ),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("exit_fullscreen_mushaf_button")
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Top Row: Selected Ayah Info + Reciter & Repeat Badge + Close
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.FullscreenExit,
-                                    contentDescription = "إنهاء ملء الشاشة",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "تصغير الشاشة",
-                                    color = GoldAccent,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = GoldAccent
+                                    ) {
+                                        Text(
+                                            text = "سورة ${tappedVerse.surahNameAr} • آية ${toArabicIndicDigits(tappedVerse.ayahNumber)}",
+                                            color = RoyalNavyDark,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "${audioPlaybackState.selectedReciter.nameAr} (${if (audioPlaybackState.targetRepeatCount == -1) "تكرار ∞" else "تكرار ${audioPlaybackState.targetRepeatCount}x"})",
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { floatingPopoverVerse = null },
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "إغلاق المربع الطائف",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column(
-                                modifier = Modifier.clickable { showSurahIndexDialog = true }
+
+                            // Action Buttons Row inside Floating Popover:
+                            // (In FullScreen: small exit-fullscreen button on the far right next to Play/Tafsir)
+                            // 1) ▶️ Play/Pause Online Audio
+                            // 2) 🔎 Offline Tafsir Al-Muyassar
+                            // 3) ⚙️ Reciter & Repeat Settings
+                            // 4) 🔖 Stop Point / Hifz
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (isFullScreen) {
+                                    IconButton(
+                                        onClick = { onToggleFullScreen(false) },
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(GoldAccent.copy(alpha = 0.18f))
+                                            .border(1.dp, GoldAccent, RoundedCornerShape(8.dp))
+                                            .testTag("exit_fullscreen_mushaf_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.FullscreenExit,
+                                            contentDescription = "تصغير الشاشة",
+                                            tint = GoldAccent,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                // Button 1: ▶️ Play Online Audio
+                                Button(
+                                    onClick = {
+                                        if (isThisVersePlaying) {
+                                            QuranAudioPlayerManager.togglePlayPause()
+                                        } else {
+                                            QuranAudioPlayerManager.playAyahOnline(
+                                                context = context,
+                                                surahNumber = tappedVerse.surahNumber,
+                                                surahNameAr = tappedVerse.surahNameAr,
+                                                ayahNumber = tappedVerse.ayahNumber,
+                                                page = tappedVerse.page
+                                            )
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EmeraldGreen,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1.25f)
+                                        .height(38.dp)
+                                        .testTag("popover_play_ayah_button")
+                                ) {
+                                    if (isThisVerseLoading) {
+                                        CircularProgressIndicator(
+                                            color = Color.White,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = if (isThisVersePlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = "تشغيل الآية صوتياً",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isThisVersePlaying) "إيقاف مؤقت" else "▶️ سماع الآية",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                // Button 2: 🔎 Offline Tafsir Al-Muyassar
+                                Button(
+                                    onClick = {
+                                        selectedVerseForSheet = tappedVerse
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = GoldAccent,
+                                        contentColor = RoyalNavyDark
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1.25f)
+                                        .height(38.dp)
+                                        .testTag("popover_tafsir_muyassar_button")
+                                ) {
+                                    Text(
+                                        text = "🔎 التفسير الميسر",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = RoyalNavyDark,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                // Button 3: ⚙️ Reciter & Repeat Settings
+                                OutlinedButton(
+                                    onClick = { showAudioSettingsDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, GoldAccent),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(38.dp)
+                                        .testTag("popover_audio_settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = "اختيار القارئ وتكرار الآية",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("القارئ/تكرار", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Button 4: 🔖 Set Stop Point & Memorize
+                                IconButton(
+                                    onClick = {
+                                        persistAutoStopPoint(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
+                                        onSaveStopBookmark(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
+                                        Toast.makeText(
+                                            context,
+                                            "تم حفظ الوقف عند الآية ${tappedVerse.ayahNumber} من سورة ${tappedVerse.surahNameAr}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.1f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BookmarkAdded,
+                                        contentDescription = "حفظ علامة الوقف هنا",
+                                        tint = if (bookmarkedSurah == tappedVerse.surahNameAr && bookmarkedAyah == tappedVerse.ayahNumber)
+                                            EmeraldGreen else GoldAccent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val added = toggleMemorizedAyah(tappedVerse.surahNumber, tappedVerse.ayahNumber)
+                                        Toast.makeText(
+                                            context,
+                                            if (added) "تم وضع علامة الحفظ ✓" else "تم إزالة علامة الحفظ",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.1f))
+                                ) {
+                                    Icon(
+                                        imageVector = if (isMemorized) Icons.Default.CheckCircle else Icons.Default.BookmarkBorder,
+                                        contentDescription = "علامة حفظ",
+                                        tint = if (isMemorized) EmeraldGreen else Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Active Online Audio Player Control Bar (shown when streaming or loading or error)
+            AnimatedVisibility(
+                visible = audioPlaybackState.isPlaying || audioPlaybackState.isLoading || audioPlaybackState.errorMessage != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Surface(
+                    color = RoyalNavyDark,
+                    border = BorderStroke(1.dp, EmeraldGreen),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 3.dp)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "سورة ${currentSurahInfo.nameArabic} • صفحة $currentPage",
+                                    text = if (audioPlaybackState.isFullSurahMode)
+                                        "بث مباشر للسورة كاملة (mp3quran.net): سورة ${audioPlaybackState.currentSurahNameAr}"
+                                    else
+                                        "سورة ${audioPlaybackState.currentSurahNameAr} • الآية ${toArabicIndicDigits(audioPlaybackState.currentAyahNumber)}",
                                     color = GoldAccent,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
+                                    fontSize = 12.5.sp
                                 )
+                                val repeatInfo = if (audioPlaybackState.targetRepeatCount == -1) {
+                                    "تكرار مستمر (المحاولة ${audioPlaybackState.currentRepeatIteration})"
+                                } else {
+                                    "تكرار ${audioPlaybackState.currentRepeatIteration} من ${audioPlaybackState.targetRepeatCount}"
+                                }
                                 Text(
-                                    text = "الجزء $currentJuz • اضغط على أي آية للتفسير أو الوقف",
-                                    color = Color.White.copy(alpha = 0.75f),
-                                    fontSize = 10.sp
+                                    text = "القارئ: ${audioPlaybackState.selectedReciter.nameAr} • $repeatInfo",
+                                    color = EmeraldGreen,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
                                 )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { QuranAudioPlayerManager.playPreviousAyah(context) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.SkipNext, contentDescription = "الآية السابقة", tint = GoldAccent)
+                                }
+
+                                IconButton(
+                                    onClick = { QuranAudioPlayerManager.togglePlayPause() },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    if (audioPlaybackState.isLoading) {
+                                        CircularProgressIndicator(
+                                            color = GoldAccent,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = if (audioPlaybackState.isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                                            contentDescription = "تشغيل / إيقاف مؤقت",
+                                            tint = EmeraldGreen,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { QuranAudioPlayerManager.playNextAyah(context) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.SkipPrevious, contentDescription = "الآية التالية", tint = GoldAccent)
+                                }
+
+                                IconButton(
+                                    onClick = { showAudioSettingsDialog = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Settings, contentDescription = "إعدادات الصوت", tint = GoldAccent, modifier = Modifier.size(18.dp))
+                                }
+
+                                IconButton(
+                                    onClick = { QuranAudioPlayerManager.stopPlayback() },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.StopCircle, contentDescription = "إيقاف المشغل", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { showSearchDialog = true },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "بحث",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = {
-                                    fontScaleSp = when {
-                                        fontScaleSp < 23f -> 24f
-                                        fontScaleSp < 27f -> 28f
-                                        fontScaleSp < 31f -> 32f
-                                        else -> 20f
-                                    }
-                                    quranPrefs.edit().putFloat("mushaf_font_size_sp", fontScaleSp).apply()
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FormatSize,
-                                    contentDescription = "حجم الخط",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = {
-                                    isNightMushafMode = !isNightMushafMode
-                                    quranPrefs.edit().putBoolean("night_mushaf_mode", isNightMushafMode).apply()
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isNightMushafMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = "الوضع الليلي",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                        if (!audioPlaybackState.errorMessage.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = audioPlaybackState.errorMessage!!,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -710,6 +971,13 @@ fun QuranReaderScreen(
                         OfflineQuranDatabase.getVersesForPage(context, pageNum)
                     }
 
+                    val activePlayingVerse = if (audioPlaybackState.isPlaying && !audioPlaybackState.isFullSurahMode) {
+                        versesOnThisPage.find {
+                            it.surahNumber == audioPlaybackState.currentSurahNumber &&
+                                    it.ayahNumber == audioPlaybackState.currentAyahNumber
+                        }
+                    } else null
+
                     MushafPageContent(
                         pageNumber = pageNum,
                         verses = versesOnThisPage,
@@ -722,9 +990,11 @@ fun QuranReaderScreen(
                         bookmarkedSurah = bookmarkedSurah,
                         bookmarkedAyah = bookmarkedAyah,
                         memorizedAyahKeys = memorizedAyahKeys,
-                        selectedVerse = selectedVerseForSheet,
+                        selectedVerse = floatingPopoverVerse ?: activePlayingVerse ?: selectedVerseForSheet,
                         onVerseClicked = { clickedVerse ->
-                            selectedVerseForSheet = clickedVerse
+                            // Show the floating action popover above the verse!
+                            floatingPopoverVerse = clickedVerse
+                            persistAutoStopPoint(clickedVerse.surahNameAr, clickedVerse.ayahNumber, clickedVerse.page)
                         }
                     )
                 }
@@ -732,7 +1002,17 @@ fun QuranReaderScreen(
         }
     }
 
-    // Interactive Ayah Control & Tafsir Bottom Sheet when any Ayah is tapped
+    // Audio & Reciter Settings Dialog (mp3quran.net Reciter Selection & Ayah Repeat Settings)
+    if (showAudioSettingsDialog) {
+        QuranAudioSettingsDialog(
+            currentSurahNumber = floatingPopoverVerse?.surahNumber ?: currentSurahInfo.number,
+            currentSurahNameAr = floatingPopoverVerse?.surahNameAr ?: currentSurahInfo.nameArabic,
+            currentPage = currentPage,
+            onDismiss = { showAudioSettingsDialog = false }
+        )
+    }
+
+    // Interactive Offline Tafsir Al-Muyassar Bottom Sheet (when user clicks 🔎 التفسير الميسر)
     selectedVerseForSheet?.let { verse ->
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val isStopBookmark = (bookmarkedSurah == verse.surahNameAr && bookmarkedAyah == verse.ayahNumber)
@@ -817,7 +1097,37 @@ fun QuranReaderScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Play Audio Button inside Tafsir Sheet too
+                Button(
+                    onClick = {
+                        QuranAudioPlayerManager.playAyahOnline(
+                            context = context,
+                            surahNumber = verse.surahNumber,
+                            surahNameAr = verse.surahNameAr,
+                            ayahNumber = verse.ayahNumber,
+                            page = verse.page
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RoyalNavyDark,
+                        contentColor = GoldAccent
+                    ),
+                    border = BorderStroke(1.dp, GoldAccent)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "▶️ استماع لتلاوة الآية بصوت ${audioPlaybackState.selectedReciter.nameAr}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Primary Action Buttons for this Ayah:
                 // 1) Set as Stop Bookmark (علامة قراءة / وقف الورد)
@@ -828,17 +1138,7 @@ fun QuranReaderScreen(
                 ) {
                     Button(
                         onClick = {
-                            bookmarkedSurah = verse.surahNameAr
-                            bookmarkedAyah = verse.ayahNumber
-                            bookmarkedPage = verse.page
-                            quranPrefs.edit()
-                                .putInt("last_read_page_$activeTrackId", verse.page)
-                                .putString("last_read_surah_$activeTrackId", verse.surahNameAr)
-                                .putInt("last_read_ayah_$activeTrackId", verse.ayahNumber)
-                                .putInt("last_read_page", verse.page)
-                                .putString("last_read_surah", verse.surahNameAr)
-                                .putInt("last_read_ayah", verse.ayahNumber)
-                                .apply()
+                            persistAutoStopPoint(verse.surahNameAr, verse.ayahNumber, verse.page)
                             onSaveStopBookmark(verse.surahNameAr, verse.ayahNumber, verse.page)
                             Toast.makeText(
                                 context,
@@ -924,7 +1224,7 @@ fun QuranReaderScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "التفسير الميسر للآية الكريمة (أوفلاين):",
+                                text = "🔎 التفسير الميسر للآية الكريمة (أوفلاين):",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = GoldAccent,
                                 fontWeight = FontWeight.Bold
@@ -1216,7 +1516,7 @@ fun QuranReaderScreen(
                                             showSearchDialog = false
                                             coroutineScope.launch {
                                                 pagerState.scrollToPage((v.page - 1).coerceIn(0, 603))
-                                                selectedVerseForSheet = v
+                                                floatingPopoverVerse = v
                                             }
                                         }
                                         .border(0.5.dp, GoldBorder, RoundedCornerShape(10.dp)),
@@ -1263,6 +1563,200 @@ fun QuranReaderScreen(
             }
         )
     }
+}
+
+@Composable
+private fun QuranAudioSettingsDialog(
+    currentSurahNumber: Int,
+    currentSurahNameAr: String,
+    currentPage: Int,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val playbackState by QuranAudioPlayerManager.playbackState.collectAsState()
+
+    val repeatOptions = listOf(
+        1 to "مرة واحدة (1x)",
+        2 to "مرتان (2x)",
+        3 to "3 مرات (3x)",
+        5 to "5 مرات (5x)",
+        7 to "7 مرات (7x)",
+        -1 to "تكرار مستمر للحفظ (∞)"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "إعدادات مشغل التلاوة الصوتية (mp3quran.net)",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = GoldAccent,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "بث صوتي مباشر أونلاين بدون تحميل على ذاكرة الهاتف",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = EmeraldGreen,
+                    fontSize = 11.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Full Surah Stream from mp3quran.net Button
+                Button(
+                    onClick = {
+                        QuranAudioPlayerManager.playFullSurahFromMp3Quran(
+                            context = context,
+                            surahNumber = currentSurahNumber,
+                            surahNameAr = currentSurahNameAr,
+                            page = currentPage
+                        )
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EmeraldGreen,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Default.PlayCircleFilled, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "تشغيل سورة $currentSurahNameAr كاملة (mp3quran.net)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Repeat Count Section
+                Text(
+                    text = "عدد مرات تكرار الآية (للتحفيظ والتدبر):",
+                    fontWeight = FontWeight.Bold,
+                    color = GoldAccent,
+                    fontSize = 13.sp
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    repeatOptions.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowItems.forEach { (countVal, label) ->
+                                val selected = playbackState.targetRepeatCount == countVal
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { QuranAudioPlayerManager.setRepeatCount(context, countVal) },
+                                    label = {
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmeraldGreen,
+                                        selectedLabelColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Auto-Advance Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "الانتقال التلقائي للآية التالية بعد التكرار",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Switch(
+                        checked = playbackState.autoAdvanceNextAyah,
+                        onCheckedChange = { QuranAudioPlayerManager.setAutoAdvanceNextAyah(context, it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EmeraldGreen
+                        )
+                    )
+                }
+
+                HorizontalDivider(color = GoldBorder.copy(alpha = 0.4f))
+
+                // Reciter Selection List
+                Text(
+                    text = "اختر القارئ المفضل (مصدر mp3quran.net):",
+                    fontWeight = FontWeight.Bold,
+                    color = GoldAccent,
+                    fontSize = 13.sp
+                )
+
+                QuranAudioPlayerManager.reciters.forEach { reciter ->
+                    val isSelected = playbackState.selectedReciter.id == reciter.id
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) EmeraldGreen.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(
+                            width = if (isSelected) 1.5.dp else 0.7.dp,
+                            color = if (isSelected) EmeraldGreen else GoldBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                QuranAudioPlayerManager.selectReciter(context, reciter)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { QuranAudioPlayerManager.selectReciter(context, reciter) },
+                                colors = RadioButtonDefaults.colors(selectedColor = EmeraldGreen)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "الشيخ ${reciter.nameAr}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = reciter.styleAr,
+                                    fontSize = 10.5.sp,
+                                    color = GoldAccent
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Text("تم الحفظ", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
 
 @Composable
@@ -1327,11 +1821,6 @@ private fun MushafPageContent(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = if (isNightMode) GoldAccent else EmeraldGreen
-                )
-                Text(
-                    text = "اضغط على أي آية للتفسير أو الوقف",
-                    fontSize = 10.sp,
-                    color = secondaryTextColor
                 )
                 Text(
                     text = "سُورَةُ $surahName",
@@ -1409,7 +1898,7 @@ private fun MushafPageContent(
                                 val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
 
                                 val bgHighlight = when {
-                                    isSelected -> GoldAccent.copy(alpha = 0.32f)
+                                    isSelected -> GoldAccent.copy(alpha = 0.35f)
                                     isBookmarked -> EmeraldGreen.copy(alpha = 0.25f)
                                     isMemorized -> GoldAccent.copy(alpha = 0.16f)
                                     else -> Color.Transparent
@@ -1581,29 +2070,6 @@ private fun MushafPageContent(
                             }
                         }
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Ornamental Mushaf Page Footer (Page Number)
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isNightMode) RoyalNavyDark else Color(0xFFF2E6CE),
-                    border = BorderStroke(1.dp, GoldAccent)
-                ) {
-                    Text(
-                        text = "— ${toArabicIndicDigits(pageNumber)} —",
-                        fontFamily = AmiriFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (isNightMode) GoldAccent else EmeraldGreen,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 3.dp)
-                    )
                 }
             }
         }

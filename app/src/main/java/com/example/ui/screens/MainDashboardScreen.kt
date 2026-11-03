@@ -116,6 +116,7 @@ import com.example.data.KhatmaMetrics
 import com.example.ui.components.AlarmTriggerChip
 import com.example.ui.components.MihrabiLogo
 import com.example.ui.components.MorningEveningAdhkarBox
+import com.example.ui.components.PrayerTimesAndAdhanCard
 import com.example.data.QuranDataHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
@@ -141,6 +142,7 @@ fun MainDashboardScreen(
     onSelectTrack: (String) -> Unit,
     onCreateTrack: (String) -> Unit,
     onRenameTrack: (String, String) -> Unit,
+    onAutoSaveStopPoint: (surah: String, ayah: Int, page: Int) -> Unit = { _, _, _ -> },
     onLogProgress: (surah: String, ayah: Int, page: Int, pagesReadToday: Int) -> Unit,
     onStartNextKhatma: () -> Unit,
     onDismissCompletionDialog: () -> Unit,
@@ -179,7 +181,7 @@ fun MainDashboardScreen(
 
     Scaffold(
         topBar = {
-            if (!(selectedBottomTab == 1 && isMushafFullScreen)) {
+            if (selectedBottomTab != 1) {
                 TopAppBar(
                     title = {
                         Row(
@@ -708,6 +710,11 @@ fun MainDashboardScreen(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
+                        // 5 Daily Prayer Times & Adhan Alert Section (with Auto GPS Location & Custom Adhan Tones)
+                        PrayerTimesAndAdhanCard()
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
                         // Morning & Evening Adhkar Box (2 Buttons)
                         MorningEveningAdhkarBox()
 
@@ -719,13 +726,20 @@ fun MainDashboardScreen(
                 }
 
                 1 -> {
-                    // Embedded Offline Mus-haf Reader Tab (with Full-Screen Toggle)
+                    // Embedded Offline Mus-haf Reader Tab (with Full-Screen Toggle & Auto-Save on Exit)
                     QuranReaderScreen(
                         activeTrackId = activeTrack.trackId,
                         activeTrackName = activeTrack.trackName,
                         initialPage = quranTargetPage,
                         isFullScreen = isMushafFullScreen,
                         onToggleFullScreen = { full -> isMushafFullScreen = full },
+                        onAutoSaveStopBookmark = { surah, ayah, page ->
+                            quranTargetPage = page
+                            lastReadPage = page
+                            lastReadSurah = surah
+                            lastReadAyah = ayah
+                            onAutoSaveStopPoint(surah, ayah, page)
+                        },
                         onSaveStopBookmark = { surah, ayah, page ->
                             onLogProgress(surah, ayah, page, (page - activeTrack.currentPage).coerceAtLeast(1))
                             quranTargetPage = page

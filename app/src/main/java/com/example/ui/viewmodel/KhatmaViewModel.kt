@@ -299,6 +299,46 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun autoSaveStopPointSilently(
+        surah: String,
+        ayah: Int,
+        page: Int
+    ) {
+        val targetUid = getCurrentUserId()
+        val currentState = _uiState.value as? KhatmaUiState.Success
+        val activeTrack = currentState?.activeTrack ?: defaultTrack
+        val clampedPage = page.coerceIn(1, 604)
+
+        val updatedTrack = activeTrack.copy(
+            currentSurah = surah,
+            currentAyah = ayah,
+            currentPage = clampedPage,
+            completedRubCount = QuranDataHelper.pageToRub(clampedPage),
+            progressPercentage = (clampedPage.toDouble() / 604.0) * 100.0
+        )
+        val updatedMetrics = QuranDataHelper.calculateMetrics(clampedPage)
+        if (currentState != null) {
+            val updatedTracksList = currentState.tracks.map {
+                if (it.trackId == activeTrack.trackId) updatedTrack else it
+            }
+            _uiState.value = currentState.copy(
+                activeTrack = updatedTrack,
+                tracks = updatedTracksList,
+                metrics = updatedMetrics
+            )
+        }
+
+        viewModelScope.launch {
+            repository.updateTrackCheckpointSilently(
+                userId = targetUid,
+                trackId = activeTrack.trackId,
+                surah = surah,
+                ayah = ayah,
+                page = clampedPage
+            )
+        }
+    }
+
     fun dismissPostLogReflectionDialog() {
         _postLogReflectionDialogData.value = null
     }

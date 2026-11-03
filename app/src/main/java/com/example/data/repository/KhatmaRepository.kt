@@ -375,6 +375,57 @@ class KhatmaRepository(
         }
     }
 
+    suspend fun updateTrackCheckpointSilently(
+        userId: String,
+        trackId: String,
+        surah: String,
+        ayah: Int,
+        page: Int
+    ) {
+        localStorage?.updateTrackCheckpointSilently(
+            trackId = trackId,
+            surah = surah,
+            ayah = ayah,
+            page = page
+        )
+
+        val firestore = db
+        if (firestore == null || isUnauthenticatedSession()) return
+
+        val clampedPage = page.coerceIn(1, QuranDataHelper.TOTAL_PAGES)
+        val rubCount = QuranDataHelper.pageToRub(clampedPage)
+        val progressPercentage = (clampedPage.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
+        val isCompleted = clampedPage >= QuranDataHelper.TOTAL_PAGES
+
+        try {
+            val userRef = firestore.collection("users").document(userId)
+            val trackRef = userRef.collection("khatma_tracks").document(trackId)
+            trackRef.update(
+                mapOf(
+                    "currentSurah" to surah,
+                    "currentAyah" to ayah,
+                    "currentPage" to clampedPage,
+                    "completedRubCount" to rubCount,
+                    "progressPercentage" to progressPercentage,
+                    "isCompleted" to isCompleted,
+                    "lastUpdated" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            userRef.update(
+                mapOf(
+                    "currentSurah" to surah,
+                    "currentAyah" to ayah,
+                    "currentPage" to clampedPage,
+                    "completedRubCount" to rubCount,
+                    "progressPercentage" to progressPercentage,
+                    "lastActiveDate" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Silent checkpoint update exception handled: ${e.message}")
+        }
+    }
+
     suspend fun startNextKhatmaForTrack(userId: String, trackId: String, currentKhatmaNum: Int) {
         val currentTracks = localStorage?.tracksFlow?.value?.toMutableList()
         val index = currentTracks?.indexOfFirst { it.trackId == trackId } ?: -1

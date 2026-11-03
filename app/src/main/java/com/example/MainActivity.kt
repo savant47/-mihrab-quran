@@ -183,6 +183,9 @@ fun AppNavigation(
                     onSelectTrack = { trackId -> khatmaViewModel.selectTrack(trackId) },
                     onCreateTrack = { name -> khatmaViewModel.createNewTrack(name) },
                     onRenameTrack = { id, name -> khatmaViewModel.renameTrack(id, name) },
+                    onAutoSaveStopPoint = { surah, ayah, page ->
+                        khatmaViewModel.autoSaveStopPointSilently(surah, ayah, page)
+                    },
                     onLogProgress = { surah, ayah, page, pagesRead ->
                         khatmaViewModel.logReadingProgress(surah, ayah, page, pagesRead)
                     },

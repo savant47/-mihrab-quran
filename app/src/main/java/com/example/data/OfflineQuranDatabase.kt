@@ -170,6 +170,11 @@ object OfflineQuranDatabase {
         return allSurahs
     }
 
+    fun getVersesForSurah(context: Context, surahNumber: Int): List<OfflineVerse> {
+        ensureLoadedSynchronously(context)
+        return allSurahs.getOrNull(surahNumber - 1)?.verses ?: emptyList()
+    }
+
     fun searchVerses(context: Context, query: String, limit: Int = 30): List<OfflineVerse> {
         ensureLoadedSynchronously(context)
         val normQuery = QuranTextMatcher.normalizeArabic(query)
