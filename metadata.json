@@ -1,0 +1,8 @@
+{
+  "name": "محرابي",
+  "description": "تطبيق محرابي لتتبع الختمات وقراءة القرآن الكريم مع حفظ محلي كامل على كاش الهاتف بدون تسجيل دخول",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

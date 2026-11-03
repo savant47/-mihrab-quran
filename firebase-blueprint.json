@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "User": {
+      "path": "users/{userId}",
+      "fields": {
+        "uid": { "type": "string", "required": true },
+        "email": { "type": "string", "required": true },
+        "displayName": { "type": "string", "required": false },
+        "role": { "type": "string", "required": true },
+        "currentKhatmaNumber": { "type": "integer", "required": true },
+        "currentSurah": { "type": "string", "required": true },
+        "currentAyah": { "type": "integer", "required": true },
+        "currentPage": { "type": "integer", "required": true },
+        "completedRubCount": { "type": "integer", "required": true },
+        "progressPercentage": { "type": "number", "required": true },
+        "lastActiveDate": { "type": "timestamp", "required": false }
+      }
+    },
+    "ReadingLog": {
+      "path": "users/{userId}/reading_logs/{logId}",
+      "fields": {
+        "logId": { "type": "string", "required": true },
+        "date": { "type": "timestamp", "required": false },
+        "surah": { "type": "string", "required": true },
+        "ayah": { "type": "integer", "required": true },
+        "pagesReadToday": { "type": "integer", "required": true },
+        "reflectionSummary": { "type": "string", "required": false }
+      }
+    }
+  }
+}
