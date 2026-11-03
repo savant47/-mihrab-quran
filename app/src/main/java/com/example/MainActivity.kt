@@ -100,9 +100,7 @@ fun AppNavigation(
     }
 
     var currentScreen by remember {
-        mutableStateOf(
-            if (localStorage.skipWelcomeScreen && localStorage.hasEnteredBefore) "dashboard" else "welcome"
-        )
+        mutableStateOf("dashboard")
     }
 
     LaunchedEffect(Unit) {
@@ -113,23 +111,6 @@ fun AppNavigation(
         SplashScreen()
     } else {
         when (currentScreen) {
-            "welcome" -> {
-                BackHandler(enabled = localStorage.hasEnteredBefore) {
-                    currentScreen = "dashboard"
-                }
-                AuthScreen(
-                    isLoading = false,
-                    onEnterClicked = { readerName, goalPages, skipFuture ->
-                        khatmaViewModel.updateReaderName(readerName)
-                        authViewModel.updateReaderProfile(readerName, goalPages)
-                        currentScreen = "dashboard"
-                    },
-                    onGuestSignInClicked = {
-                        currentScreen = "dashboard"
-                    }
-                )
-            }
-
             "admin" -> {
                 BackHandler { currentScreen = "dashboard" }
                 AdminDashboardScreen(

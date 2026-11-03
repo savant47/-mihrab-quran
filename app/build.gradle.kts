@@ -16,8 +16,9 @@ android {
     applicationId = "com.aistudio.applet.qnqkev"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+    versionCode = if (runNumber != null && runNumber > 0) (100 + runNumber) else 2
+    versionName = if (runNumber != null && runNumber > 0) "1.0.$runNumber" else "1.0.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

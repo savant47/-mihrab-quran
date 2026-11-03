@@ -1,4 +1,4 @@
-name: Android Build & Release APK
+name: Android Build & Auto-Release APK
 
 on:
   push:
@@ -7,9 +7,12 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    name: Build Android APK
+    name: Build & Publish Mihrabi APK
     runs-on: ubuntu-latest
 
     steps:
@@ -39,15 +42,48 @@ jobs:
           touch .env
 
       - name: Build Debug APK
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           if [ -f gradlew ]; then
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
             gradle assembleDebug --no-daemon --stacktrace
           fi
+          cp app/build/outputs/apk/debug/app-debug.apk Mihrabi-latest.apk
+
+      - name: Generate Release Metadata JSON
+        run: |
+          cat <<EOF > version.json
+          {
+            "versionCode": $((100 + ${{ github.run_number }})),
+            "versionName": "1.0.${{ github.run_number }}",
+            "commitSha": "${{ github.sha }}",
+            "repository": "${{ github.repository }}",
+            "apkFileName": "Mihrabi-latest.apk"
+          }
+          EOF
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QuranCompanion-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Mihrabi-APK
+          path: |
+            Mihrabi-latest.apk
+            version.json
+
+      - name: Publish Automatic GitHub Release for In-App Updater
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "تحديث تطبيق محرابي v1.0.${{ github.run_number }}"
+          body: "بناء تلقائي لملف APK من مستودع GitHub جاهز للتحديث الداخلي المباشر داخل تطبيق محرابي."
+          draft: false
+          prerelease: false
+          make_latest: "true"
+          files: |
+            Mihrabi-latest.apk
+            version.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

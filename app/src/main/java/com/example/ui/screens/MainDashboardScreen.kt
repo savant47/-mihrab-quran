@@ -242,17 +242,6 @@ fun MainDashboardScreen(
                                 )
                             }
                         }
-                        IconButton(
-                            onClick = onNavigateToWelcome,
-                            modifier = Modifier.testTag("welcome_profile_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = "الملف التعريفي وواجهة الدخول",
-                                tint = GoldAccent,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface

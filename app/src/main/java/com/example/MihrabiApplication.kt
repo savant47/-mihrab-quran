@@ -26,7 +26,7 @@ class MihrabiApplication : Application() {
             // Fallback: If standard initialization returned null (resources not found), initialize with explicit options
             if (FirebaseApp.getApps(this).isEmpty()) {
                 val options = FirebaseOptions.Builder()
-                    .setApplicationId("1:1022433742444:android:716de845df9815aa359249")
+                    .setApplicationId("1:1022433742444:android:dc703a4ca75b9a7a359249")
                     .setApiKey("AIzaSyBmvycY_CIu_AodzDHO8Qhw_kMEroFndxc")
                     .setProjectId("gen-lang-client-0751808412")
                     .setStorageBucket("gen-lang-client-0751808412.firebasestorage.app")

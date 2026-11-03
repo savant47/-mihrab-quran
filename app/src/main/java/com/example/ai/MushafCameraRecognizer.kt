@@ -11,6 +11,7 @@ import com.example.data.QuranTextMatcher
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
@@ -99,8 +100,18 @@ object MushafCameraRecognizer {
         )
     )
 
-    private val model by lazy {
-        Firebase.ai.generativeModel(
+    private val googleAiModel by lazy {
+        Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
+            modelName = "gemini-3.8-flash",
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = mushafSchema
+            }
+        )
+    }
+
+    private val vertexAiModel by lazy {
+        Firebase.ai(backend = GenerativeBackend.vertexAI()).generativeModel(
             modelName = "gemini-3.8-flash",
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
@@ -127,13 +138,19 @@ object MushafCameraRecognizer {
                 4. جزءاً واضحاً من النص القرآني الظاهر في الصورة لمطابقته مع قاعدة البيانات.
             """.trimIndent()
 
+            val inputContent = content {
+                image(scaledBitmap)
+                text(prompt)
+            }
+
             val response = withTimeout(60_000L) {
-                model.generateContent(
-                    content {
-                        image(scaledBitmap)
-                        text(prompt)
-                    }
-                )
+                try {
+                    googleAiModel.generateContent(inputContent)
+                } catch (firstErr: Exception) {
+                    if (firstErr is CancellationException) throw firstErr
+                    Log.w(TAG, "GoogleAI backend failed, falling back to VertexAI backend: ${firstErr.message}")
+                    vertexAiModel.generateContent(inputContent)
+                }
             }
 
             val jsonText = response.text ?: throw IllegalStateException("لم يتم استلام استجابة من نموذج الرؤية الذكي.")
