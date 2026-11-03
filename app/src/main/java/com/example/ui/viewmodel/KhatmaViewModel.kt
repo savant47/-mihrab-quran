@@ -11,8 +11,6 @@ import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
 import com.example.data.model.User
 import com.example.data.repository.KhatmaRepository
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,10 +41,10 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     private val aiManager = OnDeviceAiManager(application)
 
     private val defaultUser = User(
-        uid = "master_admin_savant47",
-        email = "savant47@gmail.com",
-        displayName = "آسر الشربيني",
-        role = "admin",
+        uid = "local_quran_reader",
+        email = "",
+        displayName = "القارئ المبارك",
+        role = "user",
         currentKhatmaNumber = 1,
         currentSurah = "الفاتحة",
         currentAyah = 1,
@@ -80,10 +78,6 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     private val _readingLogs = MutableStateFlow<List<ReadingLog>>(emptyList())
     val readingLogs: StateFlow<List<ReadingLog>> = _readingLogs.asStateFlow()
 
-    // No dummy or fake mock users!
-    private val _adminAllUsers = MutableStateFlow<List<User>>(emptyList())
-    val adminAllUsers: StateFlow<List<User>> = _adminAllUsers.asStateFlow()
-
     private val _isGeneratingReflection = MutableStateFlow(false)
     val isGeneratingReflection: StateFlow<Boolean> = _isGeneratingReflection.asStateFlow()
 
@@ -111,20 +105,9 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun getCurrentUserId(): String {
-        return try {
-            Firebase.auth.currentUser?.uid ?: "guest_user"
-        } catch (e: Throwable) {
-            "guest_user"
-        }
-    }
-
     fun observeUserData() {
-        val targetUid = getCurrentUserId()
-
         viewModelScope.launch {
-            repository.observeUserProfile(targetUid).collectLatest { userProfile ->
-                val activeUser = userProfile ?: defaultUser
+            repository.observeUserProfile().collectLatest { activeUser ->
                 val tracks = _khatmaTracks.value
                 val currentTrackId = _selectedTrackId.value
                 val activeTrack = tracks.find { it.trackId == currentTrackId }
@@ -156,7 +139,7 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
-            repository.observeKhatmaTracks(targetUid).collectLatest { tracks ->
+            repository.observeKhatmaTracks().collectLatest { tracks ->
                 val activeTracksList = if (tracks.isEmpty()) listOf(defaultTrack) else tracks
                 _khatmaTracks.value = activeTracksList
                 val currentState = _uiState.value as? KhatmaUiState.Success
@@ -173,14 +156,8 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
-            repository.observeReadingLogs(targetUid).collectLatest { logs ->
+            repository.observeReadingLogs().collectLatest { logs ->
                 _readingLogs.value = logs
-            }
-        }
-
-        viewModelScope.launch {
-            repository.observeAllUsersForAdmin().collectLatest { allUsers ->
-                _adminAllUsers.value = allUsers
             }
         }
     }
@@ -200,10 +177,9 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun createNewTrack(trackName: String) {
-        val targetUid = getCurrentUserId()
         viewModelScope.launch {
             try {
-                val newId = repository.createKhatmaTrack(targetUid, trackName)
+                val newId = repository.createKhatmaTrack(trackName)
                 selectTrack(newId)
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating new track", e)
@@ -212,23 +188,11 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun renameTrack(trackId: String, newName: String) {
-        val targetUid = getCurrentUserId()
         viewModelScope.launch {
             try {
-                repository.renameKhatmaTrack(targetUid, trackId, newName)
+                repository.renameKhatmaTrack(trackId, newName)
             } catch (e: Exception) {
                 Log.e(TAG, "Error renaming track", e)
-            }
-        }
-    }
-
-    fun updateReaderName(newName: String) {
-        val trimmed = newName.trim().ifBlank { "القارئ المبارك" }
-        val currentState = _uiState.value as? KhatmaUiState.Success
-        if (currentState != null) {
-            val updatedUser = currentState.user.copy(displayName = trimmed)
-            viewModelScope.launch {
-                repository.saveUserProfile(updatedUser)
             }
         }
     }
@@ -239,7 +203,6 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         page: Int,
         pagesReadToday: Int
     ) {
-        val targetUid = getCurrentUserId()
         val currentState = _uiState.value as? KhatmaUiState.Success
         val activeTrack = currentState?.activeTrack ?: defaultTrack
         val userName = currentState?.user?.displayName ?: "القارئ المبارك"
@@ -255,7 +218,6 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
                 )
 
                 repository.logReadingProgressForTrack(
-                    userId = targetUid,
                     trackId = activeTrack.trackId,
                     surah = surah,
                     ayah = ayah,
@@ -304,7 +266,6 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         ayah: Int,
         page: Int
     ) {
-        val targetUid = getCurrentUserId()
         val currentState = _uiState.value as? KhatmaUiState.Success
         val activeTrack = currentState?.activeTrack ?: defaultTrack
         val clampedPage = page.coerceIn(1, 604)
@@ -330,7 +291,6 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             repository.updateTrackCheckpointSilently(
-                userId = targetUid,
                 trackId = activeTrack.trackId,
                 surah = surah,
                 ayah = ayah,
@@ -348,14 +308,12 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startNextKhatma() {
-        val targetUid = getCurrentUserId()
         val currentState = _uiState.value as? KhatmaUiState.Success
         val activeTrack = currentState?.activeTrack ?: defaultTrack
 
         viewModelScope.launch {
             try {
                 repository.startNextKhatmaForTrack(
-                    userId = targetUid,
                     trackId = activeTrack.trackId,
                     currentKhatmaNum = activeTrack.khatmaNumber
                 )
@@ -366,3 +324,4 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 }
+

@@ -3,17 +3,15 @@ package com.example.ai
 import android.content.Context
 import android.content.res.AssetManager
 import android.util.Log
-import com.example.data.repository.QuranRepository
+import com.example.data.OfflineQuranDatabase
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 
 class OnDeviceAiManager(private val context: Context) {
 
-    private val quranRepository = QuranRepository(context)
     private val assetManager: AssetManager = context.assets
 
     private var llmInference: LlmInference? = null
@@ -107,7 +105,7 @@ class OnDeviceAiManager(private val context: Context) {
             }
         }
 
-        return@withContext generateSynthesizedReflection(surahName, ayahNumber, pageNumber, userName)
+        return@withContext generateSynthesizedReflection(surahName, ayahNumber, pageNumber)
     }
 
     private fun buildMasterPrompt(
@@ -132,33 +130,21 @@ class OnDeviceAiManager(private val context: Context) {
     private fun generateSynthesizedReflection(
         surahName: String,
         ayahNumber: Int,
-        pageNumber: Int,
-        userName: String
+        pageNumber: Int
     ): String {
         val offlineVerse = try {
-            com.example.data.OfflineQuranDatabase.getVerseBySurahName(context, surahName, ayahNumber)
+            OfflineQuranDatabase.getVerseBySurahName(context, surahName, ayahNumber)
         } catch (e: Exception) {
             null
         }
 
         val tafsirText = if (offlineVerse != null && offlineVerse.tafsirMuyassar.isNotBlank()) {
-            "قال تعالى: ﴿ ${offlineVerse.textAr} ﴾ [سورة ${offlineVerse.surahNameAr}: ${offlineVerse.ayahNumber}]\n\nالتفسير الميسر:\n${offlineVerse.tafsirMuyassar}"
+            "قال تعالى: ﴿ ${offlineVerse.textAr} ﴾ [سورة ${offlineVerse.surahNameAr}: ${offlineVerse.ayahNumber} - صفحة $pageNumber]\n\nالتفسير الميسر:\n${offlineVerse.tafsirMuyassar}"
         } else {
-            try {
-                quranRepository.getSurahTafsirFromAssets(surahName)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error fetching tafsir from assets", e)
-                "تضمنت القراءة المباركة لسورة ($surahName) توجيهات إيمانية سامية وحثاً على التدبر والتفكر."
-            }
+            OfflineQuranDatabase.getSurahTafsirOverview(context, surahName)
         }
 
-        val asbabText = try {
-            quranRepository.getAsbabNuzulFromAssets(surahName)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching asbab nuzul from assets", e)
-            "ورد في أسباب نزول سورة ($surahName) أنها تنزلت هداية ورحمة وتثبيتاً لقلوب المؤمنين."
-        }
-
+        val asbabText = OfflineQuranDatabase.getSurahAsbabAlNuzul(context, surahName)
         val duaText = com.example.data.IslamicDuaHelper.getRandomDua()
 
         return """

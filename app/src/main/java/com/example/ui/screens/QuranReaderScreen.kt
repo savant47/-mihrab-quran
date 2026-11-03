@@ -52,7 +52,6 @@ import com.example.audio.QuranReciter
 import com.example.data.OfflineQuranDatabase
 import com.example.data.OfflineVerse
 import com.example.data.QuranDataHelper
-import com.example.data.repository.QuranRepository
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
@@ -93,7 +92,6 @@ fun QuranReaderScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val quranPrefs = remember { context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE) }
-    val quranRepository = remember { QuranRepository(context) }
 
     val audioPlaybackState by QuranAudioPlayerManager.playbackState.collectAsState()
 
@@ -1018,7 +1016,7 @@ fun QuranReaderScreen(
         val isStopBookmark = (bookmarkedSurah == verse.surahNameAr && bookmarkedAyah == verse.ayahNumber)
         val isMemorized = memorizedAyahKeys.contains("${verse.surahNumber}:${verse.ayahNumber}")
         val asbabNuzul = remember(verse.surahNameAr) {
-            quranRepository.getAsbabNuzulFromAssets(verse.surahNameAr)
+            OfflineQuranDatabase.getSurahAsbabAlNuzul(context, verse.surahNameAr)
         }
 
         ModalBottomSheet(
@@ -1233,7 +1231,7 @@ fun QuranReaderScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = verse.tafsirMuyassar.ifBlank {
-                                quranRepository.getSurahTafsirFromAssets(verse.surahNameAr)
+                                OfflineQuranDatabase.getSurahTafsirOverview(context, verse.surahNameAr)
                             },
                             style = MaterialTheme.typography.bodyLarge,
                             lineHeight = 28.sp,

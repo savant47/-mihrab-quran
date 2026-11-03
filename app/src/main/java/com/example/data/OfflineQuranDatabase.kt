@@ -139,6 +139,13 @@ object OfflineQuranDatabase {
         }
     }
 
+    fun getExactPageIfLoaded(surahNumber: Int, ayahNumber: Int): Int? {
+        if (!isLoaded) return null
+        val surah = allSurahs.getOrNull(surahNumber - 1) ?: return null
+        val clamped = ayahNumber.coerceIn(1, surah.versesCount)
+        return (surah.verses.getOrNull(clamped - 1) ?: surah.verses.find { it.ayahNumber == clamped })?.page
+    }
+
     fun getVersesForPage(context: Context, page: Int): List<OfflineVerse> {
         ensureLoadedSynchronously(context)
         val clamped = page.coerceIn(1, 604)
@@ -158,6 +165,44 @@ object OfflineQuranDatabase {
             it.nameAr == surahNameAr || QuranTextMatcher.normalizeArabic(it.nameAr) == normInput
         } ?: return null
         return surah.verses.find { it.ayahNumber == ayahNumber } ?: surah.verses.firstOrNull()
+    }
+
+    fun getSurahTafsirOverview(context: Context, surahNameAr: String): String {
+        ensureLoadedSynchronously(context)
+        val normInput = QuranTextMatcher.normalizeArabic(surahNameAr)
+        val surah = allSurahs.find {
+            it.nameAr == surahNameAr || QuranTextMatcher.normalizeArabic(it.nameAr) == normInput
+        }
+        if (surah != null) {
+            val firstTafsir = surah.verses.firstOrNull()?.tafsirMuyassar.orEmpty()
+            if (firstTafsir.isNotBlank()) {
+                return "سورة ${surah.nameAr} (${surah.revelationPlaceAr} - ${surah.versesCount} آية): $firstTafsir"
+            }
+        }
+        return "سورة $surahNameAr من سور القرآن الكريم المباركة التي ترسخ الإيمان وتدعو إلى تقوى الله والعمل الصالح."
+    }
+
+    fun getSurahAsbabAlNuzul(context: Context, surahNameAr: String): String {
+        ensureLoadedSynchronously(context)
+        val normInput = QuranTextMatcher.normalizeArabic(surahNameAr)
+        val surah = allSurahs.find {
+            it.nameAr == surahNameAr || QuranTextMatcher.normalizeArabic(it.nameAr) == normInput
+        }
+        return when (surah?.number) {
+            1 -> "نزلت سورة الفاتحة بمكة المكرمة في أوائل ما نزل من القرآن لتعليم المؤمنين كيفية الثناء على الله ومناجاته في كل ركعة."
+            2 -> "نزلت سورة البقرة بالمدينة المنورة لتأسيس المجتمع الإسلامي وتشريع الأحكام والعبادات وتثبيت قلوب المؤمنين."
+            3 -> "نزلت مطالع سورة آل عمران في وفد نجران وفي بيان التوحيد الخالص، ونزل شطر منها عقب غزوة أحد لتثبيت المؤمنين."
+            18 -> "نزلت سورة الكهف بمكة جواباً لأسئلة قريش عن فتية الكهف وذي القرنين والروح، وفيها عصمة من الفتن."
+            36 -> "نزلت سورة يس بمكة المكرمة لتقرير أصول العقيدة من التوحيد والرسالة والبعث والنشور."
+            67 -> "نزلت سورة الملك بمكة لبيان عظمة سلطان الله في الخلق وهي المنجية والمانعة من عذاب القبر."
+            112 -> "نزلت سورة الإخلاص جواباً لمن سأل النبي ﷺ: انسب لنا ربك، فأنزل الله: قل هو الله أحد."
+            113, 114 -> "نزلت المعوذتان (الفلق والناس) تحصيناً للنبي ﷺ وللمؤمنين من كل شر وحسد."
+            else -> if (surah != null) {
+                "سورة ${surah.nameAr} سورة ${surah.revelationPlaceAr} وعدد آياتها ${surah.versesCount} آية، تنزلت هدايةً ورحمةً وبياناً لأحكام الله ومواعظه للعباد."
+            } else {
+                "تنزلت آيات سورة ($surahNameAr) هدايةً ورحمةً وتثبيتاً لقلوب المؤمنين."
+            }
+        }
     }
 
     fun getAllVerses(context: Context): List<OfflineVerse> {

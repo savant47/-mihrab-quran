@@ -1,83 +1,30 @@
 package com.example.ai
 
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.util.Log
-import com.example.BuildConfig
 import com.example.data.OfflineQuranDatabase
+import com.example.data.OfflineVerse
 import com.example.data.QuranDataHelper
 import com.example.data.QuranTextMatcher
-import com.google.firebase.Firebase
-import com.google.firebase.FirebaseApp
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.GenerativeBackend
-import com.google.firebase.ai.type.Schema
-import com.google.firebase.ai.type.content
-import com.google.firebase.ai.type.generationConfig
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+import com.example.data.SurahInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 private const val TAG = "MushafCameraRecognizer"
-
-private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
-private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
-private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
-private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
-
-fun configureAppCheck(context: Context, intent: Intent?) {
-    try {
-        if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
-        }
-
-        if (BuildConfig.DEBUG) {
-            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
-            if (!debugToken.isNullOrEmpty()) {
-                val persistenceKey = FirebaseApp.getInstance().persistenceKey
-                val prefs = context.getSharedPreferences(
-                    "$DEBUG_STORE_PREFIX$persistenceKey",
-                    Context.MODE_PRIVATE
-                )
-                prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
-                    .commit()
-                Log.d(TAG, "App Check debug secret configured successfully.")
-            } else {
-                Log.w(TAG, "No debug token found in Intent extra.")
-            }
-
-            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                DebugAppCheckProviderFactory.getInstance()
-            )
-            Log.d(TAG, "DebugAppCheckProviderFactory installed.")
-        } else {
-            val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
-            if (resId != 0) {
-                val siteKey = context.getString(resId)
-                if (siteKey.isNotBlank()) {
-                    FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                        RecaptchaAppCheckProviderFactory.getInstance(siteKey)
-                    )
-                    Log.d(TAG, "RecaptchaAppCheckProviderFactory installed.")
-                } else {
-                    Log.e(TAG, "recaptcha_site_key resource string is blank.")
-                }
-            } else {
-                Log.e(TAG, "recaptcha_site_key string resource not found in package.")
-            }
-        }
-    } catch (e: Exception) {
-        Log.e(TAG, "Failed to initialize Firebase App Check", e)
-    }
-}
 
 data class CameraRecognitionResult(
     val surahName: String,
@@ -88,37 +35,25 @@ data class CameraRecognitionResult(
     val confidenceNote: String
 )
 
+/**
+ * 100% Firebase-free Mushaf Page & Ayah Recognizer.
+ * Uses an independent Arabic OCR engine over HTTPS paired with local 6,236-verse
+ * Uthmani/normalized text matching, Surah banner detection, and printed page number (1..604) extraction.
+ */
 object MushafCameraRecognizer {
 
-    private val mushafSchema = Schema.obj(
-        properties = mapOf(
-            "surahNumber" to Schema.integer(description = "Surah number from 1 to 114 detected on the Mushaf page"),
-            "surahNameArabic" to Schema.string(description = "Arabic name of the Surah without 'سورة' prefix, e.g., البقرة"),
-            "ayahNumber" to Schema.integer(description = "Ayah number where the user stopped, pointed, or the prominent Ayah on the page"),
-            "pageNumber" to Schema.integer(description = "Mushaf page number (1 to 604) printed at the bottom or top of the page if visible, or 0 if not visible"),
-            "extractedArabicText" to Schema.string(description = "A clear snippet of Arabic Quranic text visible on the page to verify exact match")
-        )
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(25, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private val ocrApiKeys = listOf(
+        "helloworld",
+        "K81928388988957"
     )
-
-    private val googleAiModel by lazy {
-        Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
-            modelName = "gemini-3.8-flash",
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = mushafSchema
-            }
-        )
-    }
-
-    private val vertexAiModel by lazy {
-        Firebase.ai(backend = GenerativeBackend.vertexAI()).generativeModel(
-            modelName = "gemini-3.8-flash",
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = mushafSchema
-            }
-        )
-    }
 
     suspend fun recognizeMushafPage(
         context: Context,
@@ -127,134 +62,371 @@ object MushafCameraRecognizer {
         try {
             OfflineQuranDatabase.ensureLoaded(context)
 
-            val scaledBitmap = scaleBitmapDown(bitmap, 1280)
+            val preparedBitmap = preprocessMushafBitmap(bitmap, maxDimension = 1400)
+            val jpegBytes = compressBitmapToJpegUnderLimit(preparedBitmap, maxBytes = 900 * 1024)
 
-            val prompt = """
-                أنت خبير في قراءة صفحات المصحف الشريف (مصحف المدينة النبوية - 604 صفحة).
-                قم بتحليل صورة صفحة المصحف المرفقة بدقة واستخرج:
-                1. رقم الصفحة المطبوع في أسفل أو أعلى الصفحة (بين 1 و 604) إن وجد.
-                2. اسم السورة الكريمة ورقمها (من 1 إلى 114).
-                3. رقم الآية الكريمة (إذا كان هناك علامة وقف أو إشارة إصبع أو فاصل مصحف، اختر الآية المشار إليها، وإلا اختر آخر آية واضحة أو أول آية في الصفحة).
-                4. جزءاً واضحاً من النص القرآني الظاهر في الصورة لمطابقته مع قاعدة البيانات.
-            """.trimIndent()
+            val rawOcrText = performIndependentArabicOcr(jpegBytes)
+            Log.d(TAG, "Independent OCR extracted text (${rawOcrText.length} chars): ${rawOcrText.take(200)}")
 
-            val inputContent = content {
-                image(scaledBitmap)
-                text(prompt)
-            }
-
-            val response = withTimeout(60_000L) {
-                try {
-                    googleAiModel.generateContent(inputContent)
-                } catch (firstErr: Exception) {
-                    if (firstErr is CancellationException) throw firstErr
-                    Log.w(TAG, "GoogleAI backend failed, falling back to VertexAI backend: ${firstErr.message}")
-                    vertexAiModel.generateContent(inputContent)
-                }
-            }
-
-            val jsonText = response.text ?: throw IllegalStateException("لم يتم استلام استجابة من نموذج الرؤية الذكي.")
-            val json = JSONObject(jsonText)
-
-            val rawSurahNum = json.optInt("surahNumber", 0)
-            val rawSurahName = json.optString("surahNameArabic", "").trim()
-            val rawAyahNum = json.optInt("ayahNumber", 1).coerceAtLeast(1)
-            val rawPageNum = json.optInt("pageNumber", 0)
-            val extractedSnippet = json.optString("extractedArabicText", "").trim()
-
-            // Cross-verify against our 100% accurate local 6,236-verse database
-            // 1. Try matching the extracted Arabic snippet first
-            if (extractedSnippet.length >= 6) {
-                val textMatch = QuranTextMatcher.findAyahMatch(context, extractedSnippet)
-                if (textMatch != null) {
-                    val surahInfo = QuranDataHelper.getSurahByName(textMatch.surahName)
-                    val finalPage = if (rawPageNum in 1..604) rawPageNum else textMatch.pageNumber
-                    val finalAyah = if (rawAyahNum in 1..surahInfo.totalAyahs) rawAyahNum else textMatch.ayahNumber
-                    val verifiedVerse = OfflineQuranDatabase.getVerse(context, surahInfo.number, finalAyah)
-                    return@withContext Result.success(
-                        CameraRecognitionResult(
-                            surahName = surahInfo.nameArabic,
-                            surahNumber = surahInfo.number,
-                            ayahNumber = finalAyah,
-                            pageNumber = verifiedVerse?.page ?: finalPage,
-                            recognizedVerseSnippet = verifiedVerse?.textAr ?: extractedSnippet,
-                            confidenceNote = "تم التعرف على الصفحة ومطابقة الآيات مع قاعدة بيانات المصحف المحلي بنجاح"
-                        )
-                    )
-                }
-            }
-
-            // 2. If pageNumber (1..604) was detected directly from the printed page
-            if (rawPageNum in 1..604) {
-                val pageVerses = OfflineQuranDatabase.getVersesForPage(context, rawPageNum)
-                if (pageVerses.isNotEmpty()) {
-                    val matchedVerse = pageVerses.find {
-                        (rawSurahNum == 0 || it.surahNumber == rawSurahNum) && it.ayahNumber == rawAyahNum
-                    } ?: pageVerses.find {
-                        it.ayahNumber == rawAyahNum
-                    } ?: pageVerses.first()
-
-                    return@withContext Result.success(
-                        CameraRecognitionResult(
-                            surahName = matchedVerse.surahNameAr,
-                            surahNumber = matchedVerse.surahNumber,
-                            ayahNumber = matchedVerse.ayahNumber,
-                            pageNumber = matchedVerse.page,
-                            recognizedVerseSnippet = matchedVerse.textAr,
-                            confidenceNote = "تم قراءة رقم الصفحة (${matchedVerse.page}) وسورة ${matchedVerse.surahNameAr} آية ${matchedVerse.ayahNumber} بنجاح"
-                        )
-                    )
-                }
-            }
-
-            // 3. Match by Surah Number or Surah Name + Ayah Number
-            val targetSurah = QuranDataHelper.surahs.find { it.number == rawSurahNum }
-                ?: QuranDataHelper.surahs.find {
-                    QuranTextMatcher.normalizeArabic(it.nameArabic) == QuranTextMatcher.normalizeArabic(rawSurahName)
-                }
-                ?: QuranDataHelper.surahs.first()
-
-            val clampedAyah = rawAyahNum.coerceIn(1, targetSurah.totalAyahs)
-            val verifiedVerse = OfflineQuranDatabase.getVerse(context, targetSurah.number, clampedAyah)
-            val computedPage = verifiedVerse?.page ?: QuranDataHelper.getPageForSurahAndAyah(targetSurah.number, clampedAyah)
-
-            Result.success(
-                CameraRecognitionResult(
-                    surahName = targetSurah.nameArabic,
-                    surahNumber = targetSurah.number,
-                    ayahNumber = clampedAyah,
-                    pageNumber = computedPage,
-                    recognizedVerseSnippet = verifiedVerse?.textAr ?: extractedSnippet,
-                    confidenceNote = "تم التعرف على سورة ${targetSurah.nameArabic} الآية $clampedAyah (صفحة $computedPage)"
+            if (rawOcrText.isBlank()) {
+                return@withContext Result.failure(
+                    Exception("لم يتم العثور على نص واضح في الصورة. يرجى تقريب الكاميرا من صفحة المصحف في إضاءة جيدة.")
                 )
+            }
+
+            val matchResult = analyzeOcrTextAgainstQuranDatabase(context, rawOcrText)
+            if (matchResult != null) {
+                return@withContext Result.success(matchResult)
+            }
+
+            Result.failure(
+                Exception("تعذر مطابقة النص المستخرج من الصورة مع صفحات المصحف. حاول تصوير الصفحة بشكل عمودي واضح أو اكتب رقم الصفحة يدوياً.")
             )
-        } catch (e: TimeoutCancellationException) {
-            Log.e(TAG, "Mushaf camera recognition timed out", e)
-            Result.failure(Exception("استغرق تحليل الصورة وقتاً أطول من المعتاد. يرجى المحاولة مرة أخرى بصورة أوضح."))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Mushaf camera recognition failed", e)
-            Result.failure(Exception("تعذر التعرف التلقائي من الصورة (${e.localizedMessage ?: "خطأ في الاتصال"}). تأكد من وضوح إضاءة صفحة المصحف أو أدخل رقم الصفحة يدوياً."))
+            Log.e(TAG, "Independent Mushaf camera recognition failed", e)
+            Result.failure(
+                Exception("تعذر قراءة صورة المصحف (${e.localizedMessage ?: "تحقق من اتصال الإنترنت"}). يمكنك أيضاً كتابة رقم الصفحة أو لصق جزء من الآية.")
+            )
         }
     }
 
-    private fun scaleBitmapDown(bitmap: Bitmap, maxDimension: Int): Bitmap {
+    private fun performIndependentArabicOcr(jpegBytes: ByteArray): String {
+        var lastError: Exception? = null
+
+        for (apiKey in ocrApiKeys) {
+            try {
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("apikey", apiKey)
+                    .addFormDataPart("language", "ara")
+                    .addFormDataPart("isOverlayRequired", "false")
+                    .addFormDataPart("scale", "true")
+                    .addFormDataPart("OCREngine", "1")
+                    .addFormDataPart(
+                        "file",
+                        "mushaf_page.jpg",
+                        jpegBytes.toRequestBody("image/jpeg".toMediaType())
+                    )
+                    .build()
+
+                val request = Request.Builder()
+                    .url("https://api.ocr.space/parse/image")
+                    .post(requestBody)
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string().orEmpty()
+                    if (!response.isSuccessful || bodyStr.isBlank()) {
+                        throw IllegalStateException("HTTP ${response.code}")
+                    }
+
+                    val json = JSONObject(bodyStr)
+                    val isErrored = json.optBoolean("IsErroredOnProcessing", false)
+                    val parsedResults = json.optJSONArray("ParsedResults")
+                    if (parsedResults != null && parsedResults.length() > 0) {
+                        val sb = StringBuilder()
+                        for (i in 0 until parsedResults.length()) {
+                            val item = parsedResults.optJSONObject(i)
+                            val text = item?.optString("ParsedText", "").orEmpty()
+                            if (text.isNotBlank()) {
+                                sb.append(text).append("\n")
+                            }
+                        }
+                        val combined = sb.toString().trim()
+                        if (combined.isNotBlank()) {
+                            return combined
+                        }
+                    }
+
+                    if (isErrored) {
+                        val errArr = json.optJSONArray("ErrorMessage")
+                        val errMsg = errArr?.optString(0) ?: "OCR processing error"
+                        throw IllegalStateException(errMsg)
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "OCR attempt with key failed: ${e.message}")
+            }
+        }
+
+        if (lastError != null) {
+            throw lastError
+        }
+        return ""
+    }
+
+    /**
+     * Multi-stage Quran page & verse analyzer using the local 6,236-verse database:
+     * 1. Direct or line-by-line verse match via [QuranTextMatcher].
+     * 2. Page-level weighted word & character N-gram scoring across all 604 pages.
+     * 3. Printed page number extraction (1..604 in Arabic or Western digits) cross-checked with detected Surah/words.
+     * 4. Surah header detection ("سورة ...").
+     */
+    internal fun analyzeOcrTextAgainstQuranDatabase(
+        context: Context,
+        rawOcrText: String
+    ): CameraRecognitionResult? {
+        val cleanedText = rawOcrText.trim()
+        if (cleanedText.isEmpty()) return null
+
+        val lines = cleanedText.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        // Extract candidate printed page numbers (especially from top 2 and bottom 2 lines of the page)
+        val marginLines = (lines.take(2) + lines.takeLast(2)).distinct()
+        val marginPageCandidate = extractPageNumberCandidate(marginLines.joinToString(" "))
+        val anyPageCandidate = marginPageCandidate ?: extractPageNumberCandidate(cleanedText)
+
+        // Extract any explicit Surah name mentioned in the OCR text (e.g. top margin or Surah banner)
+        val detectedSurah = detectSurahInOcrText(cleanedText)
+
+        // Stage 1: Score all 604 pages in OfflineQuranDatabase using normalized word overlap
+        val allVerses = OfflineQuranDatabase.getAllVerses(context)
+        val normalizedFullOcr = QuranTextMatcher.normalizeArabic(cleanedText)
+        val ocrWords = normalizedFullOcr
+            .split(" ")
+            .map { it.trim() }
+            .filter { it.length >= 3 }
+
+        var bestVerseByScoring: OfflineVerse? = null
+        var bestVerseScore = 0
+        val pageScores = IntArray(605)
+
+        if (ocrWords.isNotEmpty()) {
+            val ocrWordSet = ocrWords.toSet()
+            for (verse in allVerses) {
+                var vScore = 0
+                val verseWords = verse.normalizedTextAr.split(" ")
+                for (vw in verseWords) {
+                    if (vw.length >= 3 && ocrWordSet.contains(vw)) {
+                        vScore += if (vw.length >= 5) 3 else 2
+                    }
+                }
+                // Bonus if verse belongs to detected Surah or candidate page
+                if (detectedSurah != null && verse.surahNumber == detectedSurah.number) {
+                    vScore += 2
+                }
+                if (anyPageCandidate != null && verse.page == anyPageCandidate) {
+                    vScore += 4
+                }
+
+                if (vScore > 0 && verse.page in 1..604) {
+                    pageScores[verse.page] += vScore
+                }
+                if (vScore > bestVerseScore) {
+                    bestVerseScore = vScore
+                    bestVerseByScoring = verse
+                }
+            }
+        }
+
+        // Find the page (1..604) with the highest aggregate score
+        var bestPage = 0
+        var maxPageScore = 0
+        for (p in 1..604) {
+            if (pageScores[p] > maxPageScore) {
+                maxPageScore = pageScores[p]
+                bestPage = p
+            }
+        }
+
+        // Stage 2: Check if a specific line in OCR has a strong direct match in QuranTextMatcher
+        for (line in lines.sortedByDescending { it.length }) {
+            if (line.length >= 10) {
+                val lineMatch = QuranTextMatcher.findAyahMatch(context, line)
+                if (lineMatch != null) {
+                    val surahInfo = QuranDataHelper.getSurahByName(lineMatch.surahName)
+                    val verifiedVerse = OfflineQuranDatabase.getVerse(context, surahInfo.number, lineMatch.ayahNumber)
+                    val resolvedPage = verifiedVerse?.page ?: lineMatch.pageNumber
+                    // Check if user's OCR text also contains a specific Ayah number on that same page
+                    val pageVerses = OfflineQuranDatabase.getVersesForPage(context, resolvedPage)
+                    val refinedVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
+                        ?: verifiedVerse
+
+                    return CameraRecognitionResult(
+                        surahName = refinedVerse?.surahNameAr ?: surahInfo.nameArabic,
+                        surahNumber = refinedVerse?.surahNumber ?: surahInfo.number,
+                        ayahNumber = refinedVerse?.ayahNumber ?: lineMatch.ayahNumber,
+                        pageNumber = resolvedPage,
+                        recognizedVerseSnippet = refinedVerse?.textAr ?: line,
+                        confidenceNote = "تم التعرف البصري ومطابقة الآيات محلياً بنجاح"
+                    )
+                }
+            }
+        }
+
+        // Stage 3: Use highest-scoring page from full 6,236-verse word overlap
+        if (bestPage in 1..604 && maxPageScore >= 5) {
+            val pageVerses = OfflineQuranDatabase.getVersesForPage(context, bestPage)
+            val chosenVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
+                ?: bestVerseByScoring
+                ?: pageVerses.firstOrNull()
+
+            if (chosenVerse != null) {
+                return CameraRecognitionResult(
+                    surahName = chosenVerse.surahNameAr,
+                    surahNumber = chosenVerse.surahNumber,
+                    ayahNumber = chosenVerse.ayahNumber,
+                    pageNumber = chosenVerse.page,
+                    recognizedVerseSnippet = chosenVerse.textAr,
+                    confidenceNote = "تم التعرف على صفحة ${chosenVerse.page} (سورة ${chosenVerse.surahNameAr}) ومطابقة الآيات"
+                )
+            }
+        }
+
+        // Stage 4: Printed Page Number (1..604) detected in margin
+        if (anyPageCandidate != null && anyPageCandidate in 1..604) {
+            val pageVerses = OfflineQuranDatabase.getVersesForPage(context, anyPageCandidate)
+            if (pageVerses.isNotEmpty()) {
+                val chosenVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
+                    ?: pageVerses.first()
+                return CameraRecognitionResult(
+                    surahName = chosenVerse.surahNameAr,
+                    surahNumber = chosenVerse.surahNumber,
+                    ayahNumber = chosenVerse.ayahNumber,
+                    pageNumber = chosenVerse.page,
+                    recognizedVerseSnippet = chosenVerse.textAr,
+                    confidenceNote = "تم قراءة رقم الصفحة (${chosenVerse.page}) وتحديد سورة ${chosenVerse.surahNameAr}"
+                )
+            }
+        }
+
+        // Stage 5: Surah Header detected ("سورة ...") + optional Ayah number
+        if (detectedSurah != null) {
+            val asciiDigits = QuranTextMatcher.convertArabicDigitsToAscii(cleanedText)
+            val ayahCandidate = Regex("\\b(\\d{1,3})\\b").findAll(asciiDigits)
+                .mapNotNull { it.groupValues[1].toIntOrNull() }
+                .firstOrNull { it in 1..detectedSurah.totalAyahs } ?: 1
+
+            val verifiedVerse = OfflineQuranDatabase.getVerse(context, detectedSurah.number, ayahCandidate)
+            val resolvedPage = verifiedVerse?.page
+                ?: QuranDataHelper.getPageForSurahAndAyah(detectedSurah.number, ayahCandidate)
+
+            return CameraRecognitionResult(
+                surahName = detectedSurah.nameArabic,
+                surahNumber = detectedSurah.number,
+                ayahNumber = ayahCandidate,
+                pageNumber = resolvedPage,
+                recognizedVerseSnippet = verifiedVerse?.textAr ?: "سورة ${detectedSurah.nameArabic}",
+                confidenceNote = "تم التعرف على سورة ${detectedSurah.nameArabic} (صفحة $resolvedPage)"
+            )
+        }
+
+        return null
+    }
+
+    private fun pickBestVerseOnPage(
+        pageVerses: List<OfflineVerse>,
+        normalizedOcr: String,
+        rawOcrText: String
+    ): OfflineVerse? {
+        if (pageVerses.isEmpty()) return null
+        val ocrWords = normalizedOcr.split(" ").filter { it.length >= 3 }.toSet()
+
+        // Also check if any verse number on this page appears explicitly in the OCR digits
+        val asciiText = QuranTextMatcher.convertArabicDigitsToAscii(rawOcrText)
+        val detectedNumbers = Regex("\\b(\\d{1,3})\\b").findAll(asciiText)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .toSet()
+
+        var bestVerse = pageVerses.first()
+        var bestScore = -1
+
+        for (v in pageVerses) {
+            var score = 0
+            for (w in v.normalizedTextAr.split(" ")) {
+                if (w.length >= 3 && ocrWords.contains(w)) {
+                    score += 3
+                }
+            }
+            if (detectedNumbers.contains(v.ayahNumber)) {
+                score += 4
+            }
+            if (score > bestScore) {
+                bestScore = score
+                bestVerse = v
+            }
+        }
+        return bestVerse
+    }
+
+    private fun extractPageNumberCandidate(text: String): Int? {
+        val ascii = QuranTextMatcher.convertArabicDigitsToAscii(text)
+        val candidates = Regex("(?<!\\d)(\\d{1,3})(?!\\d)")
+            .findAll(ascii)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .filter { it in 1..604 }
+            .toList()
+        return candidates.lastOrNull() ?: candidates.firstOrNull()
+    }
+
+    private fun detectSurahInOcrText(text: String): SurahInfo? {
+        val norm = QuranTextMatcher.normalizeArabic(text)
+        for (surah in QuranDataHelper.surahs.sortedByDescending { it.nameArabic.length }) {
+            val normName = QuranTextMatcher.normalizeArabic(surah.nameArabic)
+            if (norm.contains("سوره $normName") || norm.contains(normName)) {
+                return surah
+            }
+        }
+        return null
+    }
+
+    private fun preprocessMushafBitmap(bitmap: Bitmap, maxDimension: Int): Bitmap {
         val originalWidth = bitmap.width
         val originalHeight = bitmap.height
-        if (originalWidth <= maxDimension && originalHeight <= maxDimension) {
-            return bitmap
-        }
         val ratio = originalWidth.toFloat() / originalHeight.toFloat()
-        val newWidth: Int
-        val newHeight: Int
-        if (originalWidth > originalHeight) {
-            newWidth = maxDimension
-            newHeight = (maxDimension / ratio).toInt().coerceAtLeast(1)
+        val targetWidth: Int
+        val targetHeight: Int
+        if (originalWidth <= maxDimension && originalHeight <= maxDimension) {
+            targetWidth = originalWidth
+            targetHeight = originalHeight
+        } else if (originalWidth > originalHeight) {
+            targetWidth = maxDimension
+            targetHeight = (maxDimension / ratio).toInt().coerceAtLeast(1)
         } else {
-            newHeight = maxDimension
-            newWidth = (maxDimension * ratio).toInt().coerceAtLeast(1)
+            targetHeight = maxDimension
+            targetWidth = (maxDimension * ratio).toInt().coerceAtLeast(1)
         }
-        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+
+        val scaled = if (targetWidth == originalWidth && targetHeight == originalHeight) {
+            bitmap
+        } else {
+            Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+        }
+
+        // Enhance contrast slightly for crisp Arabic calligraphy OCR
+        val output = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val contrast = 1.18f
+        val brightness = -10f
+        val cm = ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, brightness,
+                0f, contrast, 0f, 0f, brightness,
+                0f, 0f, contrast, 0f, brightness,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(cm)
+        }
+        canvas.drawBitmap(scaled, 0f, 0f, paint)
+        return output
+    }
+
+    private fun compressBitmapToJpegUnderLimit(bitmap: Bitmap, maxBytes: Int): ByteArray {
+        var quality = 88
+        val baos = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        while (baos.size() > maxBytes && quality > 45) {
+            baos.reset()
+            quality -= 12
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        }
+        return baos.toByteArray()
     }
 }

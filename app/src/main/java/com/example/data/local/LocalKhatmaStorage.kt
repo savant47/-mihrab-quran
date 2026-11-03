@@ -6,16 +6,14 @@ import com.example.data.QuranDataHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
 import com.example.data.model.User
-import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Date
 
 /**
- * Local device cache for Guest Mode and offline operations.
+ * Local device storage for Mihrabi.
  * Persists all Khatma tracks, reading logs, and profile info strictly to device storage.
  */
 class LocalKhatmaStorage private constructor(context: Context) {
@@ -36,13 +34,9 @@ class LocalKhatmaStorage private constructor(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "quran_companion_local_storage"
-        private const val KEY_IS_GUEST_MODE = "is_guest_mode"
         private const val KEY_GUEST_USER = "guest_user_json"
         private const val KEY_TRACKS = "tracks_json_array"
         private const val KEY_READING_LOGS = "reading_logs_json_array"
-        private const val KEY_DAILY_GOAL_PAGES = "daily_goal_pages"
-        private const val KEY_SKIP_WELCOME = "skip_welcome_screen"
-        private const val KEY_HAS_ENTERED = "has_entered_mihrab"
 
         @Volatile
         private var instance: LocalKhatmaStorage? = null
@@ -54,48 +48,13 @@ class LocalKhatmaStorage private constructor(context: Context) {
         }
     }
 
-    var isGuestMode: Boolean
-        get() = prefs.getBoolean(KEY_IS_GUEST_MODE, true)
-        set(value) {
-            prefs.edit().putBoolean(KEY_IS_GUEST_MODE, value).apply()
-        }
-
-    var dailyGoalPages: Int
-        get() = prefs.getInt(KEY_DAILY_GOAL_PAGES, 5)
-        set(value) {
-            prefs.edit().putInt(KEY_DAILY_GOAL_PAGES, value).apply()
-        }
-
-    var skipWelcomeScreen: Boolean
-        get() = prefs.getBoolean(KEY_SKIP_WELCOME, false)
-        set(value) {
-            prefs.edit().putBoolean(KEY_SKIP_WELCOME, value).apply()
-        }
-
-    var hasEnteredBefore: Boolean
-        get() = prefs.getBoolean(KEY_HAS_ENTERED, false)
-        set(value) {
-            prefs.edit().putBoolean(KEY_HAS_ENTERED, value).apply()
-        }
-
-    fun updateReaderProfile(name: String, goalPages: Int = dailyGoalPages) {
-        val current = loadGuestUser()
-        val trimmed = name.trim().ifBlank { "القارئ المبارك" }
-        saveGuestUser(current.copy(displayName = trimmed))
-        dailyGoalPages = goalPages
-    }
-
-    fun clearSession() {
-        prefs.edit().putBoolean(KEY_IS_GUEST_MODE, true).apply()
-    }
-
     private fun loadGuestUser(): User {
         val json = prefs.getString(KEY_GUEST_USER, null)
         if (!json.isNullOrBlank()) {
             try {
                 val obj = JSONObject(json)
                 return User(
-                    uid = obj.optString("uid", "guest_user"),
+                    uid = obj.optString("uid", "local_quran_reader"),
                     email = obj.optString("email", ""),
                     displayName = obj.optString("displayName", "القارئ المبارك"),
                     role = "user",
@@ -111,7 +70,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
             }
         }
         return User(
-            uid = "guest_user",
+            uid = "local_quran_reader",
             email = "",
             displayName = "القارئ المبارك",
             role = "user",
@@ -218,11 +177,15 @@ class LocalKhatmaStorage private constructor(context: Context) {
                 val list = mutableListOf<ReadingLog>()
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
-                    val timestampSeconds = obj.optLong("timestampSeconds", System.currentTimeMillis() / 1000)
+                    val millis = if (obj.has("timestampMillis")) {
+                        obj.optLong("timestampMillis", System.currentTimeMillis())
+                    } else {
+                        obj.optLong("timestampSeconds", System.currentTimeMillis() / 1000) * 1000L
+                    }
                     list.add(
                         ReadingLog(
                             logId = obj.optString("logId", "log_$i"),
-                            date = Timestamp(timestampSeconds, 0),
+                            timestampMillis = millis,
                             surah = obj.optString("surah", "الفاتحة"),
                             ayah = obj.optInt("ayah", 1),
                             pagesReadToday = obj.optInt("pagesReadToday", 1),
@@ -239,7 +202,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
         }
         val initialLog = ReadingLog(
             logId = "initial_checkpoint",
-            date = Timestamp.now(),
+            timestampMillis = System.currentTimeMillis(),
             surah = "الفاتحة",
             ayah = 1,
             pagesReadToday = 1,
@@ -257,9 +220,10 @@ class LocalKhatmaStorage private constructor(context: Context) {
         trackId: String = "main"
     ) {
         val currentLogs = loadReadingLogs().toMutableList()
+        val nowMillis = System.currentTimeMillis()
         val newLog = ReadingLog(
-            logId = "log_${System.currentTimeMillis()}",
-            date = Timestamp.now(),
+            logId = "log_$nowMillis",
+            timestampMillis = nowMillis,
             surah = surah,
             ayah = ayah,
             pagesReadToday = pagesReadToday,
@@ -272,7 +236,8 @@ class LocalKhatmaStorage private constructor(context: Context) {
             currentLogs.forEach { log ->
                 val obj = JSONObject().apply {
                     put("logId", log.logId)
-                    put("timestampSeconds", log.date?.seconds ?: (System.currentTimeMillis() / 1000))
+                    put("timestampMillis", log.timestampMillis)
+                    put("timestampSeconds", log.timestampMillis / 1000L)
                     put("surah", log.surah)
                     put("ayah", log.ayah)
                     put("pagesReadToday", log.pagesReadToday)
@@ -317,7 +282,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
         }
         saveTracks(currentTracks)
 
-        // Update guest user profile as well
+        // Update user profile as well
         val currentUser = loadGuestUser()
         saveGuestUser(
             currentUser.copy(
@@ -370,3 +335,4 @@ class LocalKhatmaStorage private constructor(context: Context) {
         )
     }
 }
+

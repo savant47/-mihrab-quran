@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -27,19 +28,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExitToApp
-import com.example.ui.components.DiagnosticsDialog
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
@@ -116,7 +114,6 @@ import com.example.data.KhatmaMetrics
 import com.example.ui.components.AlarmTriggerChip
 import com.example.ui.components.MihrabiLogo
 import com.example.ui.components.MorningEveningAdhkarBox
-import com.example.ui.components.PrayerTimesAndAdhanCard
 import com.example.data.QuranDataHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
@@ -145,19 +142,20 @@ fun MainDashboardScreen(
     onAutoSaveStopPoint: (surah: String, ayah: Int, page: Int) -> Unit = { _, _, _ -> },
     onLogProgress: (surah: String, ayah: Int, page: Int, pagesReadToday: Int) -> Unit,
     onStartNextKhatma: () -> Unit,
-    onDismissCompletionDialog: () -> Unit,
-    onNavigateToAdmin: () -> Unit,
-    onNavigateToWelcome: () -> Unit = {},
-    onSignOut: () -> Unit = {}
+    onDismissCompletionDialog: () -> Unit
 ) {
     val context = LocalContext.current
-    var selectedBottomTab by remember { mutableIntStateOf(0) } // 0: الورد, 1: المصحف, 2: السجل
+    var selectedBottomTab by remember { mutableIntStateOf(0) } // 0: الورد, 1: المصحف, 2: مواقيت الصلاة والقبلة, 3: السجل
     val quranPrefs = remember { context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE) }
     var quranTargetPage by remember { mutableIntStateOf(activeTrack.currentPage) }
 
     var lastReadPage by remember(activeTrack) { mutableIntStateOf(activeTrack.currentPage) }
     var lastReadSurah by remember(activeTrack) { mutableStateOf(activeTrack.currentSurah) }
     var lastReadAyah by remember(activeTrack) { mutableIntStateOf(activeTrack.currentAyah) }
+
+    LaunchedEffect(Unit) {
+        com.example.alarm.PrayerTimesAndAdhanManager.scheduleAllFivePrayers(context)
+    }
 
     LaunchedEffect(selectedBottomTab, activeTrack) {
         val tId = activeTrack.trackId
@@ -173,7 +171,6 @@ fun MainDashboardScreen(
     var isMushafFullScreen by remember { mutableStateOf(false) }
     var showCreateTrackDialog by remember { mutableStateOf(false) }
     var showRenameTrackDialog by remember { mutableStateOf(false) }
-    var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
     BackHandler(enabled = selectedBottomTab == 1 && isMushafFullScreen) {
         isMushafFullScreen = false
@@ -217,32 +214,6 @@ fun MainDashboardScreen(
                             }
                         }
                     },
-                    actions = {
-                        IconButton(
-                            onClick = { showDiagnosticsDialog = true },
-                            modifier = Modifier.testTag("diagnostics_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BugReport,
-                                contentDescription = "تقرير التشخيص واللوج",
-                                tint = GoldAccent,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        if (user.isAdmin) {
-                            IconButton(
-                                onClick = onNavigateToAdmin,
-                                modifier = Modifier.testTag("admin_dashboard_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AdminPanelSettings,
-                                    contentDescription = "لوحة التحكم الإدارية",
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(30.dp)
-                                )
-                            }
-                        }
-                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface
                     )
@@ -258,19 +229,25 @@ fun MainDashboardScreen(
                         selected = selectedBottomTab == 0,
                         onClick = { selectedBottomTab = 0 },
                         icon = { Icon(imageVector = Icons.Default.Home, contentDescription = null) },
-                        label = { Text("الورد والتدبر") }
+                        label = { Text("الورد والتدبر", fontSize = 11.sp, maxLines = 1) }
                     )
                     NavigationBarItem(
                         selected = selectedBottomTab == 1,
                         onClick = { selectedBottomTab = 1 },
                         icon = { Icon(imageVector = Icons.Default.MenuBook, contentDescription = null) },
-                        label = { Text("المصحف الشريف") }
+                        label = { Text("المصحف الشريف", fontSize = 11.sp, maxLines = 1) }
                     )
                     NavigationBarItem(
                         selected = selectedBottomTab == 2,
                         onClick = { selectedBottomTab = 2 },
+                        icon = { Icon(imageVector = Icons.Default.Explore, contentDescription = null) },
+                        label = { Text("مواقيت الصلاة والقبلة", fontSize = 10.5.sp, maxLines = 1) }
+                    )
+                    NavigationBarItem(
+                        selected = selectedBottomTab == 3,
+                        onClick = { selectedBottomTab = 3 },
                         icon = { Icon(imageVector = Icons.Default.History, contentDescription = null) },
-                        label = { Text("سجل القراءات") }
+                        label = { Text("سجل القراءات", fontSize = 11.sp, maxLines = 1) }
                     )
                 }
             }
@@ -670,11 +647,6 @@ fun MainDashboardScreen(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // 5 Daily Prayer Times & Adhan Alert Section (with Auto GPS Location & Custom Adhan Tones)
-                        PrayerTimesAndAdhanCard()
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
                         // Morning & Evening Adhkar Box (2 Buttons)
                         MorningEveningAdhkarBox()
 
@@ -711,6 +683,11 @@ fun MainDashboardScreen(
                 }
 
                 2 -> {
+                    // Dedicated Prayer Times, Adhan Settings & Reverent Mihrab Qibla Compass Tab
+                    PrayerAndQiblaScreen()
+                }
+
+                3 -> {
                     // History Log View
                     Column(
                         modifier = Modifier
@@ -807,14 +784,12 @@ fun MainDashboardScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 items(readingLogs) { log ->
-                                    val dateFormatted = remember(log.date) {
-                                        log.date?.toDate()?.let {
-                                            try {
-                                                SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(it)
-                                            } catch (_: Exception) {
-                                                ""
-                                            }
-                                        } ?: ""
+                                    val dateFormatted = remember(log.timestampMillis) {
+                                        try {
+                                            SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(log.timestampMillis))
+                                        } catch (_: Exception) {
+                                            ""
+                                        }
                                     }
                                     Card(
                                         modifier = Modifier
@@ -979,10 +954,6 @@ fun MainDashboardScreen(
                 TextButton(onClick = { showRenameTrackDialog = false }) { Text("إلغاء") }
             }
         )
-    }
-
-    if (showDiagnosticsDialog) {
-        DiagnosticsDialog(onDismiss = { showDiagnosticsDialog = false })
     }
 }
 
@@ -1438,6 +1409,66 @@ private fun StopPointInputDialog(
                         label = { Text("رقم الصفحة (1-604)") },
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                val currentPageInt = pageInput.toIntOrNull()?.coerceIn(1, 604) ?: currentPage
+                val versesOnSelectedPage = remember(currentPageInt) {
+                    com.example.data.OfflineQuranDatabase.getVersesForPage(context, currentPageInt)
+                }
+                if (versesOnSelectedPage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "آيات صفحة $currentPageInt (اضغط لاختيار آية التوقف بدقة):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = GoldAccent,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(versesOnSelectedPage) { v ->
+                            val isSelectedVerse = v.surahNameAr == selectedSurahName && v.ayahNumber.toString() == ayahInput
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelectedVerse) EmeraldGreen.copy(alpha = 0.22f) else RoyalNavyDark.copy(alpha = 0.5f),
+                                border = BorderStroke(
+                                    width = if (isSelectedVerse) 1.5.dp else 0.8.dp,
+                                    color = if (isSelectedVerse) EmeraldGreen else GoldBorder
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        selectedSurahName = v.surahNameAr
+                                        ayahInput = v.ayahNumber.toString()
+                                        pageInput = v.page.toString()
+                                        pastedAyahText = v.textAr
+                                        detectedNotice = "تم اختيار سورة ${v.surahNameAr} • الآية ${v.ayahNumber} (صفحة ${v.page})"
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .widthIn(max = 170.dp)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "${v.surahNameAr} - آية ${v.ayahNumber}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = if (isSelectedVerse) EmeraldGreen else GoldAccent
+                                    )
+                                    Text(
+                                        text = v.textAr,
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))

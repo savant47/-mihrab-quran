@@ -43,9 +43,19 @@ import com.example.ui.theme.GoldBorder
 import com.example.ui.theme.RoyalNavyDark
 
 @Composable
-fun PrayerTimesAndAdhanCard() {
+fun PrayerTimesAndAdhanCard(
+    externalSettings: AdhanSettingsState? = null,
+    onExternalSettingsChanged: ((AdhanSettingsState) -> Unit)? = null
+) {
     val context = LocalContext.current
-    var settings by remember { mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context)) }
+    var internalSettings by remember { mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context)) }
+    val settings = externalSettings ?: internalSettings
+
+    fun updateSettings(newSettings: AdhanSettingsState) {
+        internalSettings = newSettings
+        onExternalSettingsChanged?.invoke(newSettings)
+    }
+
     var isDetectingLocation by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var selectedPrayerForEdit by remember { mutableStateOf<PrayerKey?>(null) }
@@ -85,13 +95,13 @@ fun PrayerTimesAndAdhanCard() {
                     locationName = locName,
                     isAutoLocation = true
                 )
-                settings = updated
+                updateSettings(updated)
                 PrayerTimesAndAdhanManager.saveSettingsAndSchedule(context, updated)
-                Toast.makeText(context, "تم تحديث مواقيت الصلاة حسب موقعك: $locName", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "تم تحديث مواقيت الصلاة والقبلة حسب موقعك: $locName", Toast.LENGTH_SHORT).show()
             }
         } else {
             isDetectingLocation = false
-            Toast.makeText(context, "يمكنك اختيار مدينتك يدوياً من إعدادات الأذان أو تفعيل صلاحية الموقع", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "يمكنك اختيار مدينتك يدوياً من الإعدادات أو تفعيل صلاحية الموقع", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -108,7 +118,7 @@ fun PrayerTimesAndAdhanCard() {
                     locationName = locName,
                     isAutoLocation = true
                 )
-                settings = updated
+                updateSettings(updated)
                 PrayerTimesAndAdhanManager.saveSettingsAndSchedule(context, updated)
                 Toast.makeText(context, "تم تحديد الموقع تلقائياً: $locName", Toast.LENGTH_SHORT).show()
             }
@@ -131,7 +141,7 @@ fun PrayerTimesAndAdhanCard() {
             PrayerTimesAndAdhanManager.detectLocationAutomatically(context) { lat, lon, locName, success ->
                 if (success) {
                     val updated = settings.copy(latitude = lat, longitude = lon, locationName = locName)
-                    settings = updated
+                    updateSettings(updated)
                     PrayerTimesAndAdhanManager.saveSettingsAndSchedule(context, updated)
                 }
             }
@@ -450,7 +460,7 @@ fun PrayerTimesAndAdhanCard() {
             onSave = { updated ->
                 MihrabiAlarmManager.stopRingtone()
                 isPlayingPreview = false
-                settings = updated
+                updateSettings(updated)
                 PrayerTimesAndAdhanManager.saveSettingsAndSchedule(context, updated)
                 showSettingsDialog = false
                 Toast.makeText(context, "تم حفظ إعدادات الأذان وجدولة المواقيت الخمسة بنجاح", Toast.LENGTH_SHORT).show()

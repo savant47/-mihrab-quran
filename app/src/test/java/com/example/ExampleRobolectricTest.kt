@@ -37,4 +37,16 @@ class ExampleRobolectricTest {
     assertEquals("البقرة", match?.surahName)
     assertEquals(26, match?.ayahNumber)
   }
+
+  @Test
+  fun `verify unified OfflineQuranDatabase loads all 114 surahs and links exact pages`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.data.OfflineQuranDatabase.ensureLoadedSynchronously(context)
+    val surahs = com.example.data.OfflineQuranDatabase.getAllSurahs(context)
+    val verses = com.example.data.OfflineQuranDatabase.getAllVerses(context)
+    assertEquals(114, surahs.size)
+    assertEquals(6236, verses.size)
+    assertEquals(42, com.example.data.QuranDataHelper.getPageForSurahAndAyah(2, 255))
+  }
 }
+

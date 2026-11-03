@@ -157,6 +157,9 @@ object QuranDataHelper {
     }
 
     fun getPageForSurahAndAyah(surahNumber: Int, ayahNumber: Int): Int {
+        OfflineQuranDatabase.getExactPageIfLoaded(surahNumber, ayahNumber)?.let { exactPage ->
+            return exactPage
+        }
         val surah = surahs.find { it.number == surahNumber } ?: return 1
         if (surah.number == 1) return 1
 
