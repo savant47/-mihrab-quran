@@ -36,17 +36,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.audio.QuranAudioPlayerManager
 import com.example.audio.QuranReciter
 import com.example.data.OfflineQuranDatabase
@@ -577,261 +582,7 @@ fun QuranReaderScreen(
                 }
             }
 
-            // FLOATING ACTION POPOVER BOX ABOVE TAPPED AYAH ("مربع صغير طائف أعلى الآية")
-            // Shows: ▶️ Play Online Audio (mp3quran.net), 🔎 Offline Tafsir Al-Muyassar, ⚙️ Reciter & Repeat, 🔖 Stop Bookmark
-            AnimatedVisibility(
-                visible = floatingPopoverVerse != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                floatingPopoverVerse?.let { tappedVerse ->
-                    val isThisVersePlaying = audioPlaybackState.isPlaying &&
-                            audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
-                            audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber &&
-                            !audioPlaybackState.isFullSurahMode
-                    val isThisVerseLoading = audioPlaybackState.isLoading &&
-                            audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
-                            audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber
-                    val isMemorized = memorizedAyahKeys.contains("${tappedVerse.surahNumber}:${tappedVerse.ayahNumber}")
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .border(1.5.dp, GoldAccent, RoundedCornerShape(16.dp))
-                            .testTag("floating_ayah_popover_box"),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = RoyalNavyDark),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Top Row: Selected Ayah Info + Reciter & Repeat Badge + Close
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = GoldAccent
-                                    ) {
-                                        Text(
-                                            text = "سورة ${tappedVerse.surahNameAr} • آية ${toArabicIndicDigits(tappedVerse.ayahNumber)}",
-                                            color = RoyalNavyDark,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 12.sp,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = "${audioPlaybackState.selectedReciter.nameAr} (${if (audioPlaybackState.targetRepeatCount == -1) "تكرار ∞" else "تكرار ${audioPlaybackState.targetRepeatCount}x"})",
-                                        color = Color.White.copy(alpha = 0.85f),
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { floatingPopoverVerse = null },
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "إغلاق المربع الطائف",
-                                        tint = GoldAccent,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            // Action Buttons Row inside Floating Popover:
-                            // (In FullScreen: small exit-fullscreen button on the far right next to Play/Tafsir)
-                            // 1) ▶️ Play/Pause Online Audio
-                            // 2) 🔎 Offline Tafsir Al-Muyassar
-                            // 3) ⚙️ Reciter & Repeat Settings
-                            // 4) 🔖 Stop Point / Hifz
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (isFullScreen) {
-                                    IconButton(
-                                        onClick = { onToggleFullScreen(false) },
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(GoldAccent.copy(alpha = 0.18f))
-                                            .border(1.dp, GoldAccent, RoundedCornerShape(8.dp))
-                                            .testTag("exit_fullscreen_mushaf_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.FullscreenExit,
-                                            contentDescription = "تصغير الشاشة",
-                                            tint = GoldAccent,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-
-                                // Button 1: ▶️ Play Online Audio
-                                Button(
-                                    onClick = {
-                                        if (isThisVersePlaying) {
-                                            QuranAudioPlayerManager.togglePlayPause()
-                                        } else {
-                                            QuranAudioPlayerManager.playAyahOnline(
-                                                context = context,
-                                                surahNumber = tappedVerse.surahNumber,
-                                                surahNameAr = tappedVerse.surahNameAr,
-                                                ayahNumber = tappedVerse.ayahNumber,
-                                                page = tappedVerse.page
-                                            )
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = EmeraldGreen,
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .weight(1.25f)
-                                        .height(38.dp)
-                                        .testTag("popover_play_ayah_button")
-                                ) {
-                                    if (isThisVerseLoading) {
-                                        CircularProgressIndicator(
-                                            color = Color.White,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = if (isThisVersePlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            contentDescription = "تشغيل الآية صوتياً",
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (isThisVersePlaying) "إيقاف مؤقت" else "▶️ سماع الآية",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                // Button 2: 🔎 Offline Tafsir Al-Muyassar
-                                Button(
-                                    onClick = {
-                                        selectedVerseForSheet = tappedVerse
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = GoldAccent,
-                                        contentColor = RoyalNavyDark
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .weight(1.25f)
-                                        .height(38.dp)
-                                        .testTag("popover_tafsir_muyassar_button")
-                                ) {
-                                    Text(
-                                        text = "🔎 التفسير الميسر",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = RoyalNavyDark,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                // Button 3: ⚙️ Reciter & Repeat Settings
-                                OutlinedButton(
-                                    onClick = { showAudioSettingsDialog = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, GoldAccent),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .height(38.dp)
-                                        .testTag("popover_audio_settings_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Tune,
-                                        contentDescription = "اختيار القارئ وتكرار الآية",
-                                        tint = GoldAccent,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("القارئ/تكرار", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                // Button 4: 🔖 Set Stop Point & Memorize
-                                IconButton(
-                                    onClick = {
-                                        persistAutoStopPoint(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
-                                        onSaveStopBookmark(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
-                                        Toast.makeText(
-                                            context,
-                                            "تم حفظ الوقف عند الآية ${tappedVerse.ayahNumber} من سورة ${tappedVerse.surahNameAr}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.White.copy(alpha = 0.1f))
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.BookmarkAdded,
-                                        contentDescription = "حفظ علامة الوقف هنا",
-                                        tint = if (bookmarkedSurah == tappedVerse.surahNameAr && bookmarkedAyah == tappedVerse.ayahNumber)
-                                            EmeraldGreen else GoldAccent,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        val added = toggleMemorizedAyah(tappedVerse.surahNumber, tappedVerse.ayahNumber)
-                                        Toast.makeText(
-                                            context,
-                                            if (added) "تم وضع علامة الحفظ ✓" else "تم إزالة علامة الحفظ",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.White.copy(alpha = 0.1f))
-                                ) {
-                                    Icon(
-                                        imageVector = if (isMemorized) Icons.Default.CheckCircle else Icons.Default.BookmarkBorder,
-                                        contentDescription = "علامة حفظ",
-                                        tint = if (isMemorized) EmeraldGreen else Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Active Online Audio Player Control Bar (shown when streaming or loading or error)
+            // Active Online Audio Player Control Bar (shown only when streaming or loading or error)
             AnimatedVisibility(
                 visible = audioPlaybackState.isPlaying || audioPlaybackState.isLoading || audioPlaybackState.errorMessage != null,
                 enter = fadeIn() + expandVertically(),
@@ -843,9 +594,9 @@ fun QuranReaderScreen(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 3.dp)
+                        .padding(horizontal = 10.dp, vertical = 2.dp)
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -854,83 +605,87 @@ fun QuranReaderScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = if (audioPlaybackState.isFullSurahMode)
-                                        "بث مباشر للسورة كاملة (mp3quran.net): سورة ${audioPlaybackState.currentSurahNameAr}"
+                                        "بث مباشر للسورة كاملة: سورة ${audioPlaybackState.currentSurahNameAr}"
                                     else
                                         "سورة ${audioPlaybackState.currentSurahNameAr} • الآية ${toArabicIndicDigits(audioPlaybackState.currentAyahNumber)}",
                                     color = GoldAccent,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.5.sp
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 val repeatInfo = if (audioPlaybackState.targetRepeatCount == -1) {
-                                    "تكرار مستمر (المحاولة ${audioPlaybackState.currentRepeatIteration})"
+                                    "تكرار مستمر (${audioPlaybackState.currentRepeatIteration})"
                                 } else {
-                                    "تكرار ${audioPlaybackState.currentRepeatIteration} من ${audioPlaybackState.targetRepeatCount}"
+                                    "تكرار ${audioPlaybackState.currentRepeatIteration}/${audioPlaybackState.targetRepeatCount}"
                                 }
                                 Text(
                                     text = "القارئ: ${audioPlaybackState.selectedReciter.nameAr} • $repeatInfo",
                                     color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { QuranAudioPlayerManager.playPreviousAyah(context) },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(Icons.Default.SkipNext, contentDescription = "الآية السابقة", tint = GoldAccent)
                                 }
 
                                 IconButton(
                                     onClick = { QuranAudioPlayerManager.togglePlayPause() },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     if (audioPlaybackState.isLoading) {
                                         CircularProgressIndicator(
                                             color = GoldAccent,
                                             strokeWidth = 2.dp,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     } else {
                                         Icon(
                                             imageVector = if (audioPlaybackState.isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
                                             contentDescription = "تشغيل / إيقاف مؤقت",
                                             tint = EmeraldGreen,
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         )
                                     }
                                 }
 
                                 IconButton(
                                     onClick = { QuranAudioPlayerManager.playNextAyah(context) },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(Icons.Default.SkipPrevious, contentDescription = "الآية التالية", tint = GoldAccent)
                                 }
 
                                 IconButton(
                                     onClick = { showAudioSettingsDialog = true },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
-                                    Icon(Icons.Default.Settings, contentDescription = "إعدادات الصوت", tint = GoldAccent, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Settings, contentDescription = "إعدادات الصوت", tint = GoldAccent, modifier = Modifier.size(17.dp))
                                 }
 
                                 IconButton(
                                     onClick = { QuranAudioPlayerManager.stopPlayback() },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
-                                    Icon(Icons.Default.StopCircle, contentDescription = "إيقاف المشغل", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.StopCircle, contentDescription = "إيقاف المشغل", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(19.dp))
                                 }
                             }
                         }
 
                         if (!audioPlaybackState.errorMessage.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = audioPlaybackState.errorMessage!!,
                                 color = MaterialTheme.colorScheme.error,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -985,16 +740,429 @@ fun QuranReaderScreen(
                         textColor = textColor,
                         secondaryTextColor = secondaryTextColor,
                         isNightMode = isNightMushafMode,
+                        isFullScreen = isFullScreen,
+                        onExitFullScreen = { onToggleFullScreen(false) },
                         bookmarkedSurah = bookmarkedSurah,
                         bookmarkedAyah = bookmarkedAyah,
                         memorizedAyahKeys = memorizedAyahKeys,
                         selectedVerse = floatingPopoverVerse ?: activePlayingVerse ?: selectedVerseForSheet,
                         onVerseClicked = { clickedVerse ->
-                            // Show the floating action popover above the verse!
                             floatingPopoverVerse = clickedVerse
                             persistAutoStopPoint(clickedVerse.surahNameAr, clickedVerse.ayahNumber, clickedVerse.page)
                         }
                     )
+                }
+            }
+        }
+    }
+
+    // TRUE FLOATING POPUP CARD WHEN USER TAPS ANY AYAH (Floats over center of screen, NOT at top of page)
+    floatingPopoverVerse?.let { tappedVerse ->
+        val isThisVersePlaying = audioPlaybackState.isPlaying &&
+                audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
+                audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber &&
+                !audioPlaybackState.isFullSurahMode
+        val isThisVerseLoading = audioPlaybackState.isLoading &&
+                audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
+                audioPlaybackState.currentAyahNumber == tappedVerse.ayahNumber
+        val isMemorized = memorizedAyahKeys.contains("${tappedVerse.surahNumber}:${tappedVerse.ayahNumber}")
+        val isStopBookmark = (bookmarkedSurah == tappedVerse.surahNameAr && bookmarkedAyah == tappedVerse.ayahNumber)
+
+        Dialog(
+            onDismissRequest = { floatingPopoverVerse = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .border(2.dp, GoldAccent, RoundedCornerShape(22.dp))
+                    .testTag("floating_ayah_popover_box"),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = RoyalNavyDark),
+                elevation = CardDefaults.cardElevation(defaultElevation = 14.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 1. Header Row: Surah + Ayah Number + Page Number + Close Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = GoldAccent
+                            ) {
+                                Text(
+                                    text = "سورة ${tappedVerse.surahNameAr} • الآية ${toArabicIndicDigits(tappedVerse.ayahNumber)}",
+                                    color = RoyalNavyDark,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmeraldGreen.copy(alpha = 0.25f),
+                                border = BorderStroke(0.8.dp, EmeraldGreen)
+                            ) {
+                                Text(
+                                    text = "صفحة ${toArabicIndicDigits(tappedVerse.page)}",
+                                    color = Color(0xFFFDF8EE),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { floatingPopoverVerse = null },
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.1f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق المربع العائم",
+                                tint = GoldAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // 2. Vocalized Ayah Text Preview Box
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF15263F),
+                        border = BorderStroke(1.dp, GoldBorder.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "﴿ ${tappedVerse.textAr} ﴾",
+                            fontFamily = AmiriFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 19.sp,
+                            lineHeight = 31.sp,
+                            color = Color(0xFFFDF8EE),
+                            textAlign = TextAlign.Center,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        )
+                    }
+
+                    // 3. Row 1: Audio Playback (تشغيل صوتي) + Reciter/Repeat Settings
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                if (isThisVersePlaying) {
+                                    QuranAudioPlayerManager.togglePlayPause()
+                                } else {
+                                    QuranAudioPlayerManager.playAyahOnline(
+                                        context = context,
+                                        surahNumber = tappedVerse.surahNumber,
+                                        surahNameAr = tappedVerse.surahNameAr,
+                                        ayahNumber = tappedVerse.ayahNumber,
+                                        page = tappedVerse.page
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EmeraldGreen,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(44.dp)
+                                .testTag("popover_play_ayah_button")
+                        ) {
+                            if (isThisVerseLoading) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (isThisVersePlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "تشغيل الآية صوتياً",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isThisVersePlaying) "إيقاف مؤقت" else "تشغيل صوتي للآية",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { showAudioSettingsDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .testTag("popover_audio_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Headphones,
+                                contentDescription = "القارئ والتكرار",
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "القارئ / تكرار",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    // 4. Row 2: Bookmarks & Memorization Marks (علامات الحفظ والوقف)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                persistAutoStopPoint(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
+                                onSaveStopBookmark(tappedVerse.surahNameAr, tappedVerse.ayahNumber, tappedVerse.page)
+                                Toast.makeText(
+                                    context,
+                                    "تم حفظ علامة الوقف عند الآية ${tappedVerse.ayahNumber} من سورة ${tappedVerse.surahNameAr}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                floatingPopoverVerse = null
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isStopBookmark) GoldAccent else Color(0xFF1F3A5F),
+                                contentColor = if (isStopBookmark) RoyalNavyDark else GoldAccent
+                            ),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isStopBookmark) Icons.Default.BookmarkAdded else Icons.Default.Bookmark,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (isStopBookmark) "موضع الوقف ✓" else "علامة الوقف",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val added = toggleMemorizedAyah(tappedVerse.surahNumber, tappedVerse.ayahNumber)
+                                Toast.makeText(
+                                    context,
+                                    if (added) "تم وضع علامة الحفظ ✓" else "تم إزالة علامة الحفظ",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isMemorized) EmeraldGreen else Color(0xFF1F3A5F),
+                                contentColor = Color.White
+                            ),
+                            border = BorderStroke(1.dp, if (isMemorized) EmeraldGreen else GoldBorder),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isMemorized) Icons.Default.CheckCircle else Icons.Default.BookmarkBorder,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (isMemorized) "تم الحفظ ✓" else "علامة الحفظ",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    // 5. Row 3: Copy Ayah & Share Ayah as Full Text (نسخ الآية + مشاركة الآية مع اسم السورة ورقم الآية)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val formattedAyah = "﴿ ${tappedVerse.textAr} ﴾\n[سورة ${tappedVerse.surahNameAr} - الآية ${toArabicIndicDigits(tappedVerse.ayahNumber)}]"
+                                clipboard.setPrimaryClip(ClipData.newPlainText("آية كريمة", formattedAyah))
+                                Toast.makeText(
+                                    context,
+                                    "تم نسخ الآية الكريمة (سورة ${tappedVerse.surahNameAr} - آية ${tappedVerse.ayahNumber})",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.2.dp, GoldAccent),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("popover_copy_ayah_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "نسخ الآية",
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "نسخ الآية",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val shareBody = buildString {
+                                    append("﴿ ${tappedVerse.textAr} ﴾\n\n")
+                                    append("📖 سورة ${tappedVerse.surahNameAr} - الآية ${toArabicIndicDigits(tappedVerse.ayahNumber)} (صفحة ${toArabicIndicDigits(tappedVerse.page)})\n")
+                                    append("— تطبيق محرابي")
+                                }
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, shareBody)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "مشاركة الآية الكريمة"))
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.2.dp, EmeraldGreen),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = EmeraldGreen.copy(alpha = 0.16f),
+                                contentColor = Color(0xFFFDF8EE)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("popover_share_ayah_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "مشاركة الآية",
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "مشاركة الآية",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    // 6. Row 4: Offline Tafsir Al-Muyassar Button (+ Exit Fullscreen if in Fullscreen)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                val v = tappedVerse
+                                floatingPopoverVerse = null
+                                selectedVerseForSheet = v
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = GoldAccent,
+                                contentColor = RoyalNavyDark
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .testTag("popover_tafsir_muyassar_button")
+                        ) {
+                            Text(
+                                text = "🔎 عرض التفسير الميسر للآية",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = RoyalNavyDark,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        if (isFullScreen) {
+                            OutlinedButton(
+                                onClick = {
+                                    floatingPopoverVerse = null
+                                    onToggleFullScreen(false)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, GoldAccent),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .testTag("exit_fullscreen_mushaf_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FullscreenExit,
+                                    contentDescription = "تصغير الشاشة",
+                                    tint = GoldAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("تصغير", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1767,6 +1935,8 @@ private fun MushafPageContent(
     textColor: Color,
     secondaryTextColor: Color,
     isNightMode: Boolean,
+    isFullScreen: Boolean = false,
+    onExitFullScreen: () -> Unit = {},
     bookmarkedSurah: String,
     bookmarkedAyah: Int,
     memorizedAyahKeys: Set<String>,
@@ -1776,40 +1946,41 @@ private fun MushafPageContent(
     val firstVerse = verses.firstOrNull()
     val surahName = firstVerse?.surahNameAr ?: ""
     val juzNumber = firstVerse?.juz ?: 1
+    val arabicPageNumber = remember(pageNumber) { toArabicIndicDigits(pageNumber) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = if (isFullScreen) 4.dp else 6.dp, vertical = 2.dp)
             .border(
                 width = 2.dp,
                 brush = Brush.verticalGradient(
                     colors = listOf(GoldAccent, GoldBorder, GoldAccent)
                 ),
-                shape = RoundedCornerShape(18.dp)
+                shape = RoundedCornerShape(16.dp)
             )
-            .padding(4.dp)
-            .border(0.8.dp, GoldBorder, RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
+            .padding(3.dp)
+            .border(0.8.dp, GoldBorder, RoundedCornerShape(13.dp))
+            .clip(RoundedCornerShape(13.dp))
             .background(pageCardColor)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Ornamental Mushaf Page Top Margin (Surah Name & Juz)
+            // 1. Ornamental Mushaf Page Top Header Bar (Juz + Page Number + Surah Name + Optional FullScreen Exit)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(0.5.dp, GoldBorder, RoundedCornerShape(8.dp))
+                    .border(0.7.dp, GoldBorder, RoundedCornerShape(8.dp))
                     .background(
-                        if (isNightMode) Color(0xFF162A3F).copy(alpha = 0.6f)
-                        else Color(0xFFF3E9D2).copy(alpha = 0.65f),
+                        if (isNightMode) Color(0xFF162A3F).copy(alpha = 0.72f)
+                        else Color(0xFFF3E9D2).copy(alpha = 0.78f),
                         RoundedCornerShape(8.dp)
                     )
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1817,117 +1988,130 @@ private fun MushafPageContent(
                     text = "الجزء ${toArabicIndicDigits(juzNumber)}",
                     fontFamily = AmiriFontFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
+                    fontSize = 13.5.sp,
                     color = if (isNightMode) GoldAccent else EmeraldGreen
                 )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (isNightMode) RoyalNavyDark else Color(0xFFE7D6B5),
+                        border = BorderStroke(0.8.dp, GoldAccent)
+                    ) {
+                        Text(
+                            text = "صفحة $arabicPageNumber",
+                            fontFamily = AmiriFontFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp,
+                            color = if (isNightMode) GoldAccent else Color(0xFF1B1612),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 1.dp)
+                        )
+                    }
+
+                    if (isFullScreen) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = RoyalNavyDark,
+                            border = BorderStroke(0.8.dp, GoldAccent),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onExitFullScreen() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FullscreenExit,
+                                    contentDescription = "تصغير الشاشة",
+                                    tint = GoldAccent,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "تصغير",
+                                    color = GoldAccent,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Text(
                     text = "سُورَةُ $surahName",
                     fontFamily = AmiriFontFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     color = if (isNightMode) GoldAccent else EmeraldGreen
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Main Verses Viewport
+            // 2. Main Verses Single-Page Auto-Fit Viewport (Fits entire page on ONE screen with bold, heavy font)
             if (!isAyahByAyahMode) {
-                // Authentic Flowing Medina Mushaf Page Mode with Interactive Tap on Every Verse
-                Column(
+                val surahGroups = remember(verses) {
+                    val groups = mutableListOf<Pair<OfflineVerse, List<OfflineVerse>>>()
+                    var currentList = mutableListOf<OfflineVerse>()
+                    var currentSurahNum = -1
+                    for (v in verses) {
+                        if (v.surahNumber != currentSurahNum) {
+                            if (currentList.isNotEmpty()) {
+                                groups.add(Pair(currentList.first(), currentList))
+                            }
+                            currentList = mutableListOf(v)
+                            currentSurahNum = v.surahNumber
+                        } else {
+                            currentList.add(v)
+                        }
+                    }
+                    if (currentList.isNotEmpty()) {
+                        groups.add(Pair(currentList.first(), currentList))
+                    }
+                    groups
+                }
+
+                val textMeasurer = rememberTextMeasurer()
+                val density = LocalDensity.current
+
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Group consecutive verses by Surah on this page so each new Surah gets its Ornamental Banner & Basmala
-                    val surahGroups = remember(verses) {
-                        val groups = mutableListOf<Pair<OfflineVerse, List<OfflineVerse>>>()
-                        var currentList = mutableListOf<OfflineVerse>()
-                        var currentSurahNum = -1
-                        for (v in verses) {
-                            if (v.surahNumber != currentSurahNum) {
-                                if (currentList.isNotEmpty()) {
-                                    groups.add(Pair(currentList.first(), currentList))
+                    val availWidthPx = constraints.maxWidth.coerceAtLeast(100)
+                    val availHeightPx = constraints.maxHeight.coerceAtLeast(100)
+
+                    // Automatically compute the largest BOLD font size that fits 100% of this page's verses
+                    // on a single screen without requiring vertical scrolling!
+                    val autoFittedFontSp = remember(
+                        pageNumber,
+                        verses,
+                        availWidthPx,
+                        availHeightPx,
+                        bookmarkedSurah,
+                        bookmarkedAyah,
+                        memorizedAyahKeys
+                    ) {
+                        var bannerOverheadPx = 0f
+                        val groupStrings = surahGroups.map { (firstV, groupVerses) ->
+                            if (firstV.ayahNumber == 1) {
+                                bannerOverheadPx += with(density) { 40.dp.toPx() }
+                                if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
+                                    bannerOverheadPx += with(density) { 26.dp.toPx() }
                                 }
-                                currentList = mutableListOf(v)
-                                currentSurahNum = v.surahNumber
-                            } else {
-                                currentList.add(v)
                             }
-                        }
-                        if (currentList.isNotEmpty()) {
-                            groups.add(Pair(currentList.first(), currentList))
-                        }
-                        groups
-                    }
-
-                    surahGroups.forEach { (firstV, groupVerses) ->
-                        // Show Ornamental Surah Header if Ayah 1 is on this page
-                        if (firstV.ayahNumber == 1) {
-                            SurahOrnamentalBanner(
-                                surahNameAr = firstV.surahNameAr,
-                                revelationPlaceAr = firstV.revelationPlaceAr,
-                                isNightMode = isNightMode
-                            )
-                            // Show Basmala for all Surahs except Al-Fatihah (where it is Ayah 1) and At-Tawbah (Surah 9)
-                            if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
-                                Text(
-                                    text = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ",
-                                    fontFamily = AmiriFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = (fontScaleSp - 1f).sp,
-                                    color = if (isNightMode) GoldAccent else EmeraldGreen,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 6.dp)
-                                )
-                            }
-                        }
-
-                        // Build Flowing AnnotatedString with individual verse click annotations
-                        val annotatedPageText = buildAnnotatedString {
-                            groupVerses.forEach { v ->
-                                val tagKey = "${v.surahNumber}:${v.ayahNumber}"
-                                val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
-                                val isMemorized = memorizedAyahKeys.contains(tagKey)
-                                val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
-
-                                val bgHighlight = when {
-                                    isSelected -> GoldAccent.copy(alpha = 0.35f)
-                                    isBookmarked -> EmeraldGreen.copy(alpha = 0.25f)
-                                    isMemorized -> GoldAccent.copy(alpha = 0.16f)
-                                    else -> Color.Transparent
-                                }
-
-                                pushStringAnnotation(tag = "AYAH_TAP", annotation = tagKey)
-                                withStyle(
-                                    style = SpanStyle(
-                                        color = textColor,
-                                        background = bgHighlight,
-                                        fontFamily = AmiriFontFamily,
-                                        fontSize = fontScaleSp.sp,
-                                        fontWeight = FontWeight.Normal
-                                    )
-                                ) {
+                            buildString {
+                                groupVerses.forEach { v ->
                                     append(v.textAr)
-                                }
-                                withStyle(
-                                    style = SpanStyle(
-                                        color = when {
-                                            isBookmarked -> EmeraldGreen
-                                            isMemorized -> GoldAccent
-                                            isNightMode -> GoldAccent
-                                            else -> Color(0xFFB5891C)
-                                        },
-                                        background = bgHighlight,
-                                        fontFamily = AmiriFontFamily,
-                                        fontSize = (fontScaleSp - 2f).sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                ) {
+                                    val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
+                                    val isMemorized = memorizedAyahKeys.contains("${v.surahNumber}:${v.ayahNumber}")
                                     val badgeSymbol = when {
                                         isBookmarked -> " ﴿${toArabicIndicDigits(v.ayahNumber)}•وقف﴾ "
                                         isMemorized -> " ﴿${toArabicIndicDigits(v.ayahNumber)}✓﴾ "
@@ -1935,38 +2119,153 @@ private fun MushafPageContent(
                                     }
                                     append(badgeSymbol)
                                 }
-                                pop()
                             }
                         }
 
-                        ClickableText(
-                            text = annotatedPageText,
-                            style = TextStyle(
-                                fontFamily = AmiriFontFamily,
-                                fontSize = fontScaleSp.sp,
-                                lineHeight = (fontScaleSp * 1.85f).sp,
-                                textAlign = TextAlign.Justify,
-                                textDirection = TextDirection.Rtl
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            onClick = { offset ->
-                                annotatedPageText.getStringAnnotations(
-                                    tag = "AYAH_TAP",
-                                    start = offset,
-                                    end = offset
-                                ).firstOrNull()?.let { annotation ->
-                                    val parts = annotation.item.split(":")
-                                    val sNum = parts.getOrNull(0)?.toIntOrNull()
-                                    val aNum = parts.getOrNull(1)?.toIntOrNull()
-                                    val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
-                                    if (matched != null) {
-                                        onVerseClicked(matched)
-                                    }
+                        val targetMaxHeightPx = (availHeightPx - bannerOverheadPx - with(density) { 8.dp.toPx() })
+                            .coerceAtLeast(80f)
+
+                        var chosenSp = 20f
+                        var candidate = 31f
+                        while (candidate >= 14.5f) {
+                            var measuredTotalHeight = 0
+                            for (gStr in groupStrings) {
+                                val res = textMeasurer.measure(
+                                    text = gStr,
+                                    style = TextStyle(
+                                        fontFamily = AmiriFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = candidate.sp,
+                                        lineHeight = (candidate * 1.34f).sp,
+                                        textAlign = TextAlign.Justify,
+                                        textDirection = TextDirection.Rtl
+                                    ),
+                                    constraints = Constraints(maxWidth = availWidthPx)
+                                )
+                                measuredTotalHeight += res.size.height + with(density) { 4.dp.roundToPx() }
+                            }
+                            if (measuredTotalHeight <= targetMaxHeightPx) {
+                                chosenSp = candidate
+                                break
+                            }
+                            candidate -= 0.5f
+                        }
+                        chosenSp
+                    }
+
+                    val effectiveLineHeightSp = autoFittedFontSp * 1.34f
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        surahGroups.forEach { (firstV, groupVerses) ->
+                            // Show Ornamental Surah Header if Ayah 1 is on this page
+                            if (firstV.ayahNumber == 1) {
+                                SurahOrnamentalBanner(
+                                    surahNameAr = firstV.surahNameAr,
+                                    revelationPlaceAr = firstV.revelationPlaceAr,
+                                    isNightMode = isNightMode
+                                )
+                                if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
+                                    Text(
+                                        text = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ",
+                                        fontFamily = AmiriFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = (autoFittedFontSp - 0.5f).coerceAtLeast(15f).sp,
+                                        color = if (isNightMode) GoldAccent else EmeraldGreen,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 2.dp)
+                                    )
                                 }
                             }
-                        )
+
+                            val annotatedPageText = buildAnnotatedString {
+                                groupVerses.forEach { v ->
+                                    val tagKey = "${v.surahNumber}:${v.ayahNumber}"
+                                    val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
+                                    val isMemorized = memorizedAyahKeys.contains(tagKey)
+                                    val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
+
+                                    val bgHighlight = when {
+                                        isSelected -> GoldAccent.copy(alpha = 0.35f)
+                                        isBookmarked -> EmeraldGreen.copy(alpha = 0.25f)
+                                        isMemorized -> GoldAccent.copy(alpha = 0.16f)
+                                        else -> Color.Transparent
+                                    }
+
+                                    pushStringAnnotation(tag = "AYAH_TAP", annotation = tagKey)
+                                    withStyle(
+                                        style = SpanStyle(
+                                            color = textColor,
+                                            background = bgHighlight,
+                                            fontFamily = AmiriFontFamily,
+                                            fontSize = autoFittedFontSp.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    ) {
+                                        append(v.textAr)
+                                    }
+                                    withStyle(
+                                        style = SpanStyle(
+                                            color = when {
+                                                isBookmarked -> EmeraldGreen
+                                                isMemorized -> GoldAccent
+                                                isNightMode -> GoldAccent
+                                                else -> Color(0xFFA67B14)
+                                            },
+                                            background = bgHighlight,
+                                            fontFamily = AmiriFontFamily,
+                                            fontSize = (autoFittedFontSp - 1.5f).coerceAtLeast(13f).sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    ) {
+                                        val badgeSymbol = when {
+                                            isBookmarked -> " ﴿${toArabicIndicDigits(v.ayahNumber)}•وقف﴾ "
+                                            isMemorized -> " ﴿${toArabicIndicDigits(v.ayahNumber)}✓﴾ "
+                                            else -> " ﴿${toArabicIndicDigits(v.ayahNumber)}﴾ "
+                                        }
+                                        append(badgeSymbol)
+                                    }
+                                    pop()
+                                }
+                            }
+
+                            ClickableText(
+                                text = annotatedPageText,
+                                style = TextStyle(
+                                    fontFamily = AmiriFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = autoFittedFontSp.sp,
+                                    lineHeight = effectiveLineHeightSp.sp,
+                                    textAlign = TextAlign.Justify,
+                                    textDirection = TextDirection.Rtl
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                onClick = { offset ->
+                                    annotatedPageText.getStringAnnotations(
+                                        tag = "AYAH_TAP",
+                                        start = offset,
+                                        end = offset
+                                    ).firstOrNull()?.let { annotation ->
+                                        val parts = annotation.item.split(":")
+                                        val sNum = parts.getOrNull(0)?.toIntOrNull()
+                                        val aNum = parts.getOrNull(1)?.toIntOrNull()
+                                        val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
+                                        if (matched != null) {
+                                            onVerseClicked(matched)
+                                        }
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             } else {
@@ -2048,8 +2347,9 @@ private fun MushafPageContent(
                                 Text(
                                     text = "${v.textAr} ﴿${toArabicIndicDigits(v.ayahNumber)}﴾",
                                     fontFamily = AmiriFontFamily,
+                                    fontWeight = FontWeight.Bold,
                                     fontSize = fontScaleSp.sp,
-                                    lineHeight = (fontScaleSp * 1.75f).sp,
+                                    lineHeight = (fontScaleSp * 1.55f).sp,
                                     color = textColor,
                                     textAlign = TextAlign.Right,
                                     modifier = Modifier.fillMaxWidth()
@@ -2070,6 +2370,32 @@ private fun MushafPageContent(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            // 3. Pinned Ornamental Mushaf Bottom Page Number Medallion (Always visible on every page)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFF3E9D2),
+                    border = BorderStroke(1.dp, GoldAccent)
+                ) {
+                    Text(
+                        text = "━━ ۞ صفحة $arabicPageNumber من ٦٠٤ ۞ ━━",
+                        fontFamily = AmiriFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.sp,
+                        color = if (isNightMode) GoldAccent else Color(0xFF1B1612),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -2083,40 +2409,44 @@ private fun SurahOrnamentalBanner(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp),
+            .padding(vertical = 3.dp),
+        shape = RoundedCornerShape(10.dp),
         color = if (isNightMode) RoyalNavyDark else Color(0xFFEDE0C4),
-        border = BorderStroke(1.5.dp, GoldAccent)
+        border = BorderStroke(1.2.dp, GoldAccent)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "۞",
-                fontSize = 18.sp,
+                fontSize = 15.sp,
                 color = GoldAccent
             )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
                     text = "سُورَةُ $surahNameAr",
                     fontFamily = AmiriFontFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
+                    fontSize = 17.sp,
                     color = if (isNightMode) GoldAccent else EmeraldGreen
                 )
                 Text(
-                    text = revelationPlaceAr,
+                    text = "(${revelationPlaceAr})",
                     fontSize = 11.sp,
-                    color = if (isNightMode) Color.White.copy(alpha = 0.75f) else Color(0xFF5C4E3C)
+                    fontWeight = FontWeight.Bold,
+                    color = if (isNightMode) Color.White.copy(alpha = 0.78f) else Color(0xFF5C4E3C)
                 )
             }
             Text(
                 text = "۞",
-                fontSize = 18.sp,
+                fontSize = 15.sp,
                 color = GoldAccent
             )
         }
