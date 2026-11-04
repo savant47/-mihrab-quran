@@ -1445,6 +1445,20 @@ private fun StopPointInputDialog(
         }
     }
 
+    var pendingCameraPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    fun decodeUriToBitmap(uri: android.net.Uri): Bitmap? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.isMutableRequired = true
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        }
+    }
+
     val takePicturePreviewLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
@@ -1453,11 +1467,42 @@ private fun StopPointInputDialog(
         }
     }
 
+    val takeHighResPictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        val uri = pendingCameraPhotoUri
+        if (success && uri != null) {
+            try {
+                val bitmap = decodeUriToBitmap(uri)
+                if (bitmap != null) {
+                    processBitmapForStopPoint(bitmap)
+                }
+            } catch (e: Exception) {
+                cameraErrorNotice = "تعذر قراءة الصورة الملتقطة: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun startCameraCapture() {
+        try {
+            val tempFile = java.io.File(context.cacheDir, "mushaf_capture_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+            pendingCameraPhotoUri = uri
+            takeHighResPictureLauncher.launch(uri)
+        } catch (_: Exception) {
+            takePicturePreviewLauncher.launch(null)
+        }
+    }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            takePicturePreviewLauncher.launch(null)
+            startCameraCapture()
         } else {
             cameraErrorNotice = "يرجى السماح بصلاحية الكاميرا لتصوير صفحة المصحف، أو اختر صورة من المعرض."
         }
@@ -1468,15 +1513,7 @@ private fun StopPointInputDialog(
     ) { uri ->
         if (uri != null) {
             try {
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    val source = ImageDecoder.createSource(context.contentResolver, uri)
-                    ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                        decoder.isMutableRequired = true
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                }
+                val bitmap = decodeUriToBitmap(uri)
                 if (bitmap != null) {
                     processBitmapForStopPoint(bitmap)
                 }
@@ -1492,7 +1529,7 @@ private fun StopPointInputDialog(
             Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
         if (hasPerm) {
-            takePicturePreviewLauncher.launch(null)
+            startCameraCapture()
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
@@ -2003,7 +2040,11 @@ fun TasbeehSection() {
         )
     }
 
-    val counts = remember {
+    val backupVersion by remember {
+        LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+    }.collectAsState()
+
+    val counts = remember(backupVersion) {
         mutableStateMapOf<String, Int>().apply {
             adhkarList.forEach { dhikr ->
                 this[dhikr.key] = prefs.getInt(dhikr.key, 0)

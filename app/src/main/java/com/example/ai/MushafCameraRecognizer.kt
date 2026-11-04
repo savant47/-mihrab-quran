@@ -17,14 +17,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 private const val TAG = "MushafCameraRecognizer"
 
@@ -38,10 +36,11 @@ data class CameraRecognitionResult(
 )
 
 /**
- * 100% Firebase-free Mushaf Page & Ayah Recognizer.
- * Uses a multi-engine Arabic/Auto OCR cascade (OCREngine 2 & 3 with language=auto) over HTTPS
- * paired with local 6,236-verse Uthmani/normalized text matching, Surah banner detection,
- * and printed page number (1..604) extraction.
+ * 100% Firebase-free Mushaf Page, Surah & First-Ayah Recognizer.
+ * Uses multi-engine Arabic OCR (OCREngine 2 & 3 with language=auto) paired with:
+ * - Full 604-page Uthmani + Imlai skeleton scoring across all 6,236 Quran verses
+ * - Fuzzy Surah header/banner detection ("سورة الكهف" even when OCR reads "سورة الكفف")
+ * - Automatic determination of the Page number, Surah name, and the First Ayah on the page.
  */
 object MushafCameraRecognizer {
 
@@ -53,9 +52,10 @@ object MushafCameraRecognizer {
             .build()
     }
 
+    // Prioritize dedicated key first to avoid demo key rate-limiting (HTTP 429)
     private val ocrApiKeys = listOf(
-        "helloworld",
-        "K81928388988957"
+        "K81928388988957",
+        "helloworld"
     )
 
     private data class OcrEngineSpec(
@@ -63,12 +63,15 @@ object MushafCameraRecognizer {
         val language: String?
     )
 
-    // OCREngine 2 and 3 natively support Arabic calligraphy via language="auto" without E201 error
+    // OCREngine 2 & 3 natively recognize Arabic calligraphy & Arabic-Indic digits via language="auto"
     private val engineSpecs = listOf(
         OcrEngineSpec(engine = "2", language = "auto"),
         OcrEngineSpec(engine = "3", language = "auto"),
-        OcrEngineSpec(engine = "2", language = null),
-        OcrEngineSpec(engine = "1", language = "eng")
+        OcrEngineSpec(engine = "2", language = null)
+    )
+
+    private val commonBasmalahWords = setOf(
+        "بسم", "الله", "الرحمن", "الرحيم"
     )
 
     suspend fun recognizeMushafPage(
@@ -78,11 +81,11 @@ object MushafCameraRecognizer {
         try {
             OfflineQuranDatabase.ensureLoaded(context)
 
-            val preparedBitmap = preprocessMushafBitmap(bitmap, maxDimension = 1350)
-            val jpegBytes = compressBitmapToJpegUnderLimit(preparedBitmap, maxBytes = 820 * 1024)
+            val preparedBitmap = preprocessMushafBitmap(bitmap, maxDimension = 1400)
+            val jpegBytes = compressBitmapToJpegUnderLimit(preparedBitmap, maxBytes = 850 * 1024)
 
             val rawOcrText = performIndependentArabicOcr(jpegBytes)
-            Log.d(TAG, "Independent OCR extracted text (${rawOcrText.length} chars): ${rawOcrText.take(200)}")
+            Log.d(TAG, "Independent OCR extracted text (${rawOcrText.length} chars): ${rawOcrText.take(300)}")
 
             if (rawOcrText.isBlank()) {
                 return@withContext Result.failure(
@@ -96,7 +99,7 @@ object MushafCameraRecognizer {
             }
 
             Result.failure(
-                Exception("تعذر مطابقة النص المستخرج من الصورة مع صفحات المصحف. حاول تصوير الصفحة بشكل عمودي واضح أو اكتب رقم الصفحة يدوياً.")
+                Exception("تعذر مطابقة النص المستخرج من الصورة مع صفحات المصحف. حاول تصوير الصفحة كاملة بشكل واضح أو اكتب رقم الصفحة يدوياً.")
             )
         } catch (e: CancellationException) {
             throw e
@@ -154,9 +157,8 @@ object MushafCameraRecognizer {
                             }
                             val combined = sb.toString().trim()
                             if (combined.isNotBlank()) {
-                                // Check if we got Arabic letters or valid page digits
-                                val hasArabicChars = combined.any { it in '\u0600'..'\u06FF' }
-                                if (hasArabicChars) {
+                                val arabicCharCount = combined.count { it in '\u0600'..'\u06FF' }
+                                if (arabicCharCount >= 8) {
                                     return combined
                                 } else {
                                     collectedSnippets.append(combined).append("\n")
@@ -189,11 +191,12 @@ object MushafCameraRecognizer {
     }
 
     /**
-     * Multi-stage Quran page & verse analyzer using the local 6,236-verse database:
-     * 1. Direct or line-by-line verse match via [QuranTextMatcher].
-     * 2. Page-level weighted word & character N-gram scoring across all 604 pages.
-     * 3. Printed page number extraction (1..604 in Arabic or Western digits) cross-checked with detected Surah/words.
-     * 4. Surah header detection ("سورة ...").
+     * Full-page Uthmani + Skeleton Quran Page & First-Ayah Analyzer:
+     * 1. Detects any explicit or fuzzy Surah banner ("سورة الكهف", "سورة الإسراء", etc.).
+     * 2. Scores all 604 pages across all 6,236 verses using both exact normalized words and
+     *    Alef-agnostic Uthmani skeletons (so Uthmani "الكتب / سبحن / عظما / رفتا" matches OCR "الكتاب / سبحان / عظاما / رفاتا").
+     * 3. Automatically selects the matched Page, the Surah, and the FIRST Ayah on that page
+     *    (or the first Ayah of the newly starting Surah if a Surah header banner appears on that page).
      */
     internal fun analyzeOcrTextAgainstQuranDatabase(
         context: Context,
@@ -206,55 +209,87 @@ object MushafCameraRecognizer {
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
-        // Extract candidate printed page numbers (especially from top 2 and bottom 2 lines of the page)
-        val marginLines = (lines.take(2) + lines.takeLast(2)).distinct()
-        val marginPageCandidate = extractPageNumberCandidate(marginLines.joinToString(" "))
-        val anyPageCandidate = marginPageCandidate ?: extractPageNumberCandidate(cleanedText)
+        // 1. Detect explicit or fuzzy Surah Header Banner ("سورة ...")
+        val detectedSurahBanner = detectSurahBannerFuzzy(cleanedText)
 
-        // Extract any explicit Surah name mentioned in the OCR text (e.g. top margin or Surah banner)
-        val detectedSurah = detectSurahInOcrText(cleanedText)
-
-        // Stage 1: Score all 604 pages in OfflineQuranDatabase using normalized word overlap
-        val allVerses = OfflineQuranDatabase.getAllVerses(context)
+        // 2. Normalize full OCR text and build word + Uthmani skeleton lookup sets
         val normalizedFullOcr = QuranTextMatcher.normalizeArabic(cleanedText)
-        val ocrWords = normalizedFullOcr
+        val ocrWordsList = normalizedFullOcr
             .split(" ")
             .map { it.trim() }
             .filter { it.length >= 3 }
 
-        var bestVerseByScoring: OfflineVerse? = null
-        var bestVerseScore = 0
-        val pageScores = IntArray(605)
+        // Exclude standalone Basmalah words from dominating Page 1 (Al-Fatiha) when a new Surah starts on another page
+        val nonBasmalahWords = ocrWordsList.filter { it !in commonBasmalahWords }
+        val activeOcrWords = if (nonBasmalahWords.size >= 4) nonBasmalahWords else ocrWordsList
 
-        if (ocrWords.isNotEmpty()) {
-            val ocrWordSet = ocrWords.toSet()
+        val ocrWordSet = activeOcrWords.toSet()
+        val ocrSkeletonSet = activeOcrWords
+            .map { QuranTextMatcher.toUthmaniSkeleton(it) }
+            .filter { it.length >= 3 }
+            .toSet()
+        val compactOcrSkeletonStream = activeOcrWords.joinToString("") { QuranTextMatcher.toUthmaniSkeleton(it) }
+
+        val allVerses = OfflineQuranDatabase.getAllVerses(context)
+        val pageScores = IntArray(605)
+        val verseScores = HashMap<String, Int>(512)
+
+        if (activeOcrWords.isNotEmpty()) {
             for (verse in allVerses) {
                 var vScore = 0
                 val verseWords = verse.normalizedTextAr.split(" ")
+                var matchedDistinctWords = 0
+
                 for (vw in verseWords) {
-                    if (vw.length >= 3 && ocrWordSet.contains(vw)) {
-                        vScore += if (vw.length >= 5) 3 else 2
+                    if (vw.length < 3) continue
+                    // Skip common Basmalah words on Page 1 unless the whole OCR text is only Al-Fatiha
+                    if (verse.page == 1 && vw in commonBasmalahWords && activeOcrWords.size > 10) {
+                        continue
+                    }
+
+                    val vSkel = QuranTextMatcher.toUthmaniSkeleton(vw)
+                    when {
+                        ocrWordSet.contains(vw) -> {
+                            vScore += if (vw.length >= 5) 6 else 4
+                            matchedDistinctWords++
+                        }
+                        vSkel.length >= 3 && ocrSkeletonSet.contains(vSkel) -> {
+                            vScore += if (vSkel.length >= 4) 5 else 3
+                            matchedDistinctWords++
+                        }
+                        vSkel.length >= 5 && compactOcrSkeletonStream.contains(vSkel) -> {
+                            // Handles joined OCR words like "كلماخبت", "خلقاجديدا", "منقبله", "اياماتدعوا"
+                            vScore += 4
+                            matchedDistinctWords++
+                        }
                     }
                 }
-                // Bonus if verse belongs to detected Surah or candidate page
-                if (detectedSurah != null && verse.surahNumber == detectedSurah.number) {
-                    vScore += 2
-                }
-                if (anyPageCandidate != null && verse.page == anyPageCandidate) {
-                    vScore += 4
+
+                if (matchedDistinctWords >= 3) {
+                    vScore += matchedDistinctWords * 3
                 }
 
                 if (vScore > 0 && verse.page in 1..604) {
                     pageScores[verse.page] += vScore
-                }
-                if (vScore > bestVerseScore) {
-                    bestVerseScore = vScore
-                    bestVerseByScoring = verse
+                    verseScores["${verse.surahNumber}:${verse.ayahNumber}"] = vScore
                 }
             }
         }
 
-        // Find the page (1..604) with the highest aggregate score
+        // Apply bonus for detected Surah banner ("سورة ...")
+        if (detectedSurahBanner != null) {
+            val startPage = QuranDataHelper.getPageForSurahAndAyah(detectedSurahBanner.number, 1)
+            if (startPage in 1..604) {
+                pageScores[startPage] += 32
+            }
+            for (verse in allVerses) {
+                if (verse.surahNumber == detectedSurahBanner.number && verse.page in 1..604) {
+                    pageScores[verse.page] += 3
+                }
+            }
+        }
+
+        // Find the highest-scoring page across all 604 Mushaf pages
         var bestPage = 0
         var maxPageScore = 0
         for (p in 1..604) {
@@ -264,124 +299,112 @@ object MushafCameraRecognizer {
             }
         }
 
-        // Stage 2: Check if a specific line in OCR has a strong direct match in QuranTextMatcher
-        for (line in lines.sortedByDescending { it.length }) {
-            if (line.length >= 10) {
-                val lineMatch = QuranTextMatcher.findAyahMatch(context, line)
-                if (lineMatch != null) {
-                    val surahInfo = QuranDataHelper.getSurahByName(lineMatch.surahName)
-                    val verifiedVerse = OfflineQuranDatabase.getVerse(context, surahInfo.number, lineMatch.ayahNumber)
-                    val resolvedPage = verifiedVerse?.page ?: lineMatch.pageNumber
-                    // Check if user's OCR text also contains a specific Ayah number on that same page
-                    val pageVerses = OfflineQuranDatabase.getVersesForPage(context, resolvedPage)
-                    val refinedVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
-                        ?: verifiedVerse
-
-                    return CameraRecognitionResult(
-                        surahName = refinedVerse?.surahNameAr ?: surahInfo.nameArabic,
-                        surahNumber = refinedVerse?.surahNumber ?: surahInfo.number,
-                        ayahNumber = refinedVerse?.ayahNumber ?: lineMatch.ayahNumber,
-                        pageNumber = resolvedPage,
-                        recognizedVerseSnippet = refinedVerse?.textAr ?: line,
-                        confidenceNote = "تم التعرف البصري ومطابقة الآيات محلياً بنجاح"
-                    )
-                }
-            }
-        }
-
-        // Stage 3: Use highest-scoring page from full 6,236-verse word overlap
-        if (bestPage in 1..604 && maxPageScore >= 5) {
+        if (bestPage in 1..604 && maxPageScore >= 12) {
             val pageVerses = OfflineQuranDatabase.getVersesForPage(context, bestPage)
-            val chosenVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
-                ?: bestVerseByScoring
-                ?: pageVerses.firstOrNull()
-
-            if (chosenVerse != null) {
-                return CameraRecognitionResult(
-                    surahName = chosenVerse.surahNameAr,
-                    surahNumber = chosenVerse.surahNumber,
-                    ayahNumber = chosenVerse.ayahNumber,
-                    pageNumber = chosenVerse.page,
-                    recognizedVerseSnippet = chosenVerse.textAr,
-                    confidenceNote = "تم التعرف على صفحة ${chosenVerse.page} (سورة ${chosenVerse.surahNameAr}) ومطابقة الآيات"
-                )
-            }
-        }
-
-        // Stage 4: Printed Page Number (1..604) detected in margin
-        if (anyPageCandidate != null && anyPageCandidate in 1..604) {
-            val pageVerses = OfflineQuranDatabase.getVersesForPage(context, anyPageCandidate)
             if (pageVerses.isNotEmpty()) {
-                val chosenVerse = pickBestVerseOnPage(pageVerses, normalizedFullOcr, cleanedText)
-                    ?: pageVerses.first()
+                val chosenFirstVerse = selectPageFirstAyahAutomatically(
+                    pageVerses = pageVerses,
+                    detectedSurahBanner = detectedSurahBanner,
+                    verseScores = verseScores
+                )
                 return CameraRecognitionResult(
-                    surahName = chosenVerse.surahNameAr,
-                    surahNumber = chosenVerse.surahNumber,
-                    ayahNumber = chosenVerse.ayahNumber,
-                    pageNumber = chosenVerse.page,
-                    recognizedVerseSnippet = chosenVerse.textAr,
-                    confidenceNote = "تم قراءة رقم الصفحة (${chosenVerse.page}) وتحديد سورة ${chosenVerse.surahNameAr}"
+                    surahName = chosenFirstVerse.surahNameAr,
+                    surahNumber = chosenFirstVerse.surahNumber,
+                    ayahNumber = chosenFirstVerse.ayahNumber,
+                    pageNumber = bestPage,
+                    recognizedVerseSnippet = chosenFirstVerse.textAr,
+                    confidenceNote = "تم التعرف التلقائي على الصفحة والسورة والآية الأولى"
                 )
             }
         }
 
-        // Stage 5: Surah Header detected ("سورة ...") + optional Ayah number
-        if (detectedSurah != null) {
-            val asciiDigits = QuranTextMatcher.convertArabicDigitsToAscii(cleanedText)
-            val ayahCandidate = Regex("\\b(\\d{1,3})\\b").findAll(asciiDigits)
-                .mapNotNull { it.groupValues[1].toIntOrNull() }
-                .firstOrNull { it in 1..detectedSurah.totalAyahs } ?: 1
-
-            val verifiedVerse = OfflineQuranDatabase.getVerse(context, detectedSurah.number, ayahCandidate)
-            val resolvedPage = verifiedVerse?.page
-                ?: QuranDataHelper.getPageForSurahAndAyah(detectedSurah.number, ayahCandidate)
+        // Fallback 1: If a Surah banner was clearly read (e.g., "سورة الكهف" or "سورة الإسراء")
+        if (detectedSurahBanner != null) {
+            val startPage = QuranDataHelper.getPageForSurahAndAyah(detectedSurahBanner.number, 1)
+            val pageVerses = OfflineQuranDatabase.getVersesForPage(context, startPage)
+            val firstOfSurah = pageVerses.firstOrNull { it.surahNumber == detectedSurahBanner.number }
+                ?: OfflineQuranDatabase.getVerse(context, detectedSurahBanner.number, 1)
 
             return CameraRecognitionResult(
-                surahName = detectedSurah.nameArabic,
-                surahNumber = detectedSurah.number,
-                ayahNumber = ayahCandidate,
-                pageNumber = resolvedPage,
-                recognizedVerseSnippet = verifiedVerse?.textAr ?: "سورة ${detectedSurah.nameArabic}",
-                confidenceNote = "تم التعرف على سورة ${detectedSurah.nameArabic} (صفحة $resolvedPage)"
+                surahName = detectedSurahBanner.nameArabic,
+                surahNumber = detectedSurahBanner.number,
+                ayahNumber = firstOfSurah?.ayahNumber ?: 1,
+                pageNumber = firstOfSurah?.page ?: startPage,
+                recognizedVerseSnippet = firstOfSurah?.textAr ?: "سورة ${detectedSurahBanner.nameArabic}",
+                confidenceNote = "تم التعرف على عنوان سورة ${detectedSurahBanner.nameArabic} وتحديد أول آية"
             )
+        }
+
+        // Fallback 2: Printed Page Number (1..604) in top/bottom margin if no verses were clear enough
+        val marginLines = (lines.take(2) + lines.takeLast(2)).distinct()
+        val pageCandidate = extractPageNumberCandidate(marginLines.joinToString(" "))
+            ?: extractPageNumberCandidate(cleanedText)
+        if (pageCandidate != null && pageCandidate in 1..604) {
+            val pageVerses = OfflineQuranDatabase.getVersesForPage(context, pageCandidate)
+            if (pageVerses.isNotEmpty()) {
+                val firstVerseOnPage = pageVerses.first()
+                return CameraRecognitionResult(
+                    surahName = firstVerseOnPage.surahNameAr,
+                    surahNumber = firstVerseOnPage.surahNumber,
+                    ayahNumber = firstVerseOnPage.ayahNumber,
+                    pageNumber = firstVerseOnPage.page,
+                    recognizedVerseSnippet = firstVerseOnPage.textAr,
+                    confidenceNote = "تم قراءة رقم الصفحة (${firstVerseOnPage.page}) وتحديد الآية الأولى تلقائياً"
+                )
+            }
         }
 
         return null
     }
 
-    private fun pickBestVerseOnPage(
+    /**
+     * Automatically selects the primary Surah and FIRST Ayah on the recognized page:
+     * - If the page contains a single Surah (e.g. Page 292 -> Surah Al-Isra 97..105), returns `pageVerses.first()`
+     *   (Surah Al-Isra, Ayah 97 — the very first Ayah on the page).
+     * - If the page contains multiple Surahs (e.g. Page 293 has the end of Al-Isra 105..111 AND the start of Al-Kahf 1..4):
+     *   - If the OCR detected the Surah banner for the new Surah on that page (e.g. "سورة الكهف") or if a new Surah starts at Ayah 1 on that page and has matched words, returns the first Ayah of that Surah on the page (`سورة الكهف • آية 1`).
+     *   - Otherwise returns `pageVerses.first()`.
+     */
+    private fun selectPageFirstAyahAutomatically(
         pageVerses: List<OfflineVerse>,
-        normalizedOcr: String,
-        rawOcrText: String
-    ): OfflineVerse? {
-        if (pageVerses.isEmpty()) return null
-        val ocrWords = normalizedOcr.split(" ").filter { it.length >= 3 }.toSet()
+        detectedSurahBanner: SurahInfo?,
+        verseScores: Map<String, Int>
+    ): OfflineVerse {
+        if (pageVerses.isEmpty()) {
+            throw IllegalArgumentException("pageVerses cannot be empty")
+        }
 
-        // Also check if any verse number on this page appears explicitly in the OCR digits
-        val asciiText = QuranTextMatcher.convertArabicDigitsToAscii(rawOcrText)
-        val detectedNumbers = Regex("\\b(\\d{1,3})\\b").findAll(asciiText)
-            .mapNotNull { it.groupValues[1].toIntOrNull() }
-            .toSet()
-
-        var bestVerse = pageVerses.first()
-        var bestScore = -1
-
-        for (v in pageVerses) {
-            var score = 0
-            for (w in v.normalizedTextAr.split(" ")) {
-                if (w.length >= 3 && ocrWords.contains(w)) {
-                    score += 3
-                }
-            }
-            if (detectedNumbers.contains(v.ayahNumber)) {
-                score += 4
-            }
-            if (score > bestScore) {
-                bestScore = score
-                bestVerse = v
+        // 1. If the OCR explicitly read a Surah banner (e.g. "سورة الكهف") that is present on this page,
+        // return the first verse of that Surah on this page!
+        if (detectedSurahBanner != null) {
+            val firstOfBannerSurah = pageVerses.firstOrNull { it.surahNumber == detectedSurahBanner.number }
+            if (firstOfBannerSurah != null) {
+                return firstOfBannerSurah
             }
         }
-        return bestVerse
+
+        // 2. Check if this page has more than one Surah (e.g. a new Surah starts with Ayah 1 on this page)
+        val distinctSurahsOnPage = pageVerses.map { it.surahNumber }.distinct()
+        if (distinctSurahsOnPage.size > 1) {
+            // If a new Surah starts on this page (ayahNumber == 1) and has strong verse matches in the OCR,
+            // check which Surah on the page had higher average/total match or if the new Surah is prominent
+            val newSurahFirstVerse = pageVerses.firstOrNull { it.ayahNumber == 1 && it.surahNumber != pageVerses.first().surahNumber }
+            if (newSurahFirstVerse != null) {
+                val newSurahScore = pageVerses
+                    .filter { it.surahNumber == newSurahFirstVerse.surahNumber }
+                    .sumOf { verseScores["${it.surahNumber}:${it.ayahNumber}"] ?: 0 }
+                val prevSurahScore = pageVerses
+                    .filter { it.surahNumber == pageVerses.first().surahNumber }
+                    .sumOf { verseScores["${it.surahNumber}:${it.ayahNumber}"] ?: 0 }
+
+                if (newSurahScore > prevSurahScore) {
+                    return newSurahFirstVerse
+                }
+            }
+        }
+
+        // 3. Default: return the very first Ayah at the top of the recognized page!
+        return pageVerses.first()
     }
 
     private fun extractPageNumberCandidate(text: String): Int? {
@@ -394,15 +417,69 @@ object MushafCameraRecognizer {
         return candidates.lastOrNull() ?: candidates.firstOrNull()
     }
 
-    private fun detectSurahInOcrText(text: String): SurahInfo? {
+    /**
+     * Detects explicit Surah banners ("سورة الكهف", "سورة الإسراء", etc.) in OCR text,
+     * tolerating 1 character of OCR noise (such as "سورة الكفف" -> "سورة الكهف")
+     * while NEVER false-matching 1-letter Surah names ("ص", "ق", "ن") inside normal words.
+     */
+    private fun detectSurahBannerFuzzy(text: String): SurahInfo? {
         val norm = QuranTextMatcher.normalizeArabic(text)
-        for (surah in QuranDataHelper.surahs.sortedByDescending { it.nameArabic.length }) {
-            val normName = QuranTextMatcher.normalizeArabic(surah.nameArabic)
-            if (norm.contains("سوره $normName") || norm.contains(normName)) {
-                return surah
+        val words = norm.split(" ").filter { it.isNotBlank() }
+
+        // Look for "سوره <SurahName>" or fuzzy "سوره" ("سوره", "سورة", "سورا") followed by a Surah name
+        for (i in 0 until words.size - 1) {
+            val w = words[i]
+            if (w == "سوره" || w == "سورا" || (w.length == 4 && editDistance(w, "سوره") <= 1)) {
+                val nextOne = words[i + 1]
+                val nextTwo = if (i + 2 < words.size) "$nextOne ${words[i + 2]}" else nextOne
+
+                // 1. Exact match after "سوره"
+                for (surah in QuranDataHelper.surahs.sortedByDescending { it.nameArabic.length }) {
+                    val normSurah = QuranTextMatcher.normalizeArabic(surah.nameArabic)
+                    if (nextTwo == normSurah || nextOne == normSurah) {
+                        return surah
+                    }
+                }
+
+                // 2. Fuzzy 1-edit-distance match after "سوره" for Surah names with >= 4 chars (e.g. "الكفف" -> "الكهف")
+                var bestSurah: SurahInfo? = null
+                var bestDist = 99
+                for (surah in QuranDataHelper.surahs) {
+                    val normSurah = QuranTextMatcher.normalizeArabic(surah.nameArabic)
+                    if (normSurah.length < 4) continue
+                    val d1 = editDistance(nextOne, normSurah)
+                    val d2 = editDistance( QuranTextMatcher.toUthmaniSkeleton(nextOne), QuranTextMatcher.toUthmaniSkeleton(normSurah))
+                    val minD = min(d1, d2)
+                    if (minD <= 1 && minD < bestDist) {
+                        bestDist = minD
+                        bestSurah = surah
+                    }
+                }
+                if (bestSurah != null) {
+                    return bestSurah
+                }
             }
         }
         return null
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        val m = a.length
+        val n = b.length
+        val dp = Array(m + 1) { IntArray(n + 1) }
+        for (i in 0..m) dp[i][0] = i
+        for (j in 0..n) dp[0][j] = j
+        for (i in 1..m) {
+            for (j in 1..n) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + cost
+                )
+            }
+        }
+        return dp[m][n]
     }
 
     private fun preprocessMushafBitmap(bitmap: Bitmap, maxDimension: Int): Bitmap {

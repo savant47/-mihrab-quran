@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.alarm.MihrabiAlarmManager
+import com.example.alarm.PrayerTimesAndAdhanManager
+import com.example.audio.QuranAudioPlayerManager
 import com.example.data.SpiritualMessageItem
 import com.example.data.local.LocalKhatmaStorage
 import com.example.ui.theme.EmeraldGreen
@@ -445,10 +448,29 @@ fun BackupRestoreDialog(
 ) {
     val context = LocalContext.current
     val storage = remember { LocalKhatmaStorage.getInstance(context) }
+    val restoreVersion by storage.backupRestoreVersionFlow.collectAsState()
+
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
     var showPasteCodeField by remember { mutableStateOf(false) }
     var pastedJsonCode by remember { mutableStateOf("") }
+
+    // Live snapshot of all app settings included in the backup
+    val adhanSettings = remember(restoreVersion) {
+        PrayerTimesAndAdhanManager.loadSettings(context)
+    }
+    val customAlarms = remember(restoreVersion) {
+        MihrabiAlarmManager.getAllAlarms(context)
+    }
+    val quranAudioState by QuranAudioPlayerManager.playbackState.collectAsState()
+    val hifzCount = remember(restoreVersion) {
+        context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
+            .getStringSet("memorized_ayahs_set", emptySet())?.size ?: 0
+    }
+
+    LaunchedEffect(Unit) {
+        QuranAudioPlayerManager.initPreferences(context)
+    }
 
     // 1. Export (.json file creation via Android Storage Access Framework)
     val exportFileLauncher = rememberLauncherForActivityResult(
@@ -461,8 +483,8 @@ fun BackupRestoreDialog(
                     out.write(backupJson.toByteArray(Charsets.UTF_8))
                 }
                 isError = false
-                statusMessage = "تم حفظ ملف النسخة الاحتياطية على هاتفك بنجاح! يمكنك استعادته في أي وقت حتى بعد حذف التطبيق وتحديثه."
-                Toast.makeText(context, "تم حفظ النسخة الاحتياطية بنجاح", Toast.LENGTH_LONG).show()
+                statusMessage = "تم حفظ ملف النسخة الاحتياطية الشاملة على هاتفك بنجاح (يشمل الختمة، القارئ والتكرار، إعدادات الأذان ومواقيت وإشعارات الصلوات الخمس، النغمات، والمنبهات)!"
+                Toast.makeText(context, "تم حفظ النسخة الاحتياطية الشاملة بنجاح", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 isError = true
                 statusMessage = "تعذر حفظ الملف: ${e.localizedMessage}"
@@ -509,7 +531,7 @@ fun BackupRestoreDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "النسخ الاحتياطي واستعادة التقدم",
+                    text = "النسخ الاحتياطي الشامل للتطبيق",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = GoldAccent
@@ -523,7 +545,7 @@ fun BackupRestoreDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Current Progress Summary Box
+                // Current Progress & Complete Settings Summary Box
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = RoyalNavyDark,
@@ -533,32 +555,43 @@ fun BackupRestoreDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Text(
-                            text = "بياناتك الحالية المحفوظة:",
+                            text = "كل ما يتم حفظه واستعادته في النسخة الاحتياطية:",
                             color = GoldAccent,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.5.sp
                         )
                         Text(
-                            text = "• موقع التوقف: سورة $currentSurah (صفحة $currentPage)",
+                            text = "📖 الختمة والمصحف: سورة $currentSurah (صفحة $currentPage) • $tracksCount ورد • $logsCount سجل • $hifzCount علامة حفظ",
                             color = Color(0xFFFDF8EE),
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp
+                        )
+                        val repeatLabel = if (quranAudioState.targetRepeatCount == -1) "تكرار مستمر" else "${quranAudioState.targetRepeatCount} مرات"
+                        Text(
+                            text = "🎙️ القارئ والتكرار: الشيخ ${quranAudioState.selectedReciter.nameAr} • التكرار ($repeatLabel)",
+                            color = Color(0xFFFDF8EE),
+                            fontSize = 11.5.sp
                         )
                         Text(
-                            text = "• عدد الأوراد: $tracksCount • سجلات القراءة: $logsCount",
-                            color = Color(0xFFFDF8EE).copy(alpha = 0.85f),
+                            text = "🕌 الأذان ومواقيت الصلاة: ${adhanSettings.locationName} • ${adhanSettings.calculationMethod.titleAr}",
+                            color = Color(0xFFFDF8EE),
                             fontSize = 11.5.sp
+                        )
+                        Text(
+                            text = "🔔 إشعارات ونغمات الصلوات الخمس: ${adhanSettings.globalAlertMode.titleAr} + تخصيص كل صلاة (${customAlarms.size} منبه مخصص)",
+                            color = Color(0xFFFDF8EE).copy(alpha = 0.9f),
+                            fontSize = 11.sp
                         )
                     }
                 }
 
                 Text(
-                    text = "احفظ نسخة احتياطية من تقدمك على هاتفك قبل مسح التطبيق أو تحديثه، ثم اضغط «استعادة التقدم» في النسخة الجديدة ليعود كل شيء كما كان دون إدخال يدوي.",
-                    fontSize = 12.sp,
+                    text = "احفظ نسخة احتياطية شاملة لكل تقدمك وإعدادات التطبيق (الأذان، إشعارات كل صلاة، النغمات، القارئ، التكرار، وعلامات الوقف والحفظ) واستعدها بضغطة واحدة بعد التحديث.",
+                    fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                    lineHeight = 18.sp
+                    lineHeight = 17.sp
                 )
 
                 // Primary Button 1: Save Backup File (.json) to Phone

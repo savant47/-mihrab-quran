@@ -56,7 +56,12 @@ fun PrayerTimesAndAdhanCard(
     onExternalSettingsChanged: ((AdhanSettingsState) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    var internalSettings by remember { mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context)) }
+    val backupVersion by remember {
+        com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+    }.collectAsState()
+    var internalSettings by remember(backupVersion) {
+        mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context))
+    }
     val settings = externalSettings ?: internalSettings
 
     fun updateSettings(newSettings: AdhanSettingsState) {

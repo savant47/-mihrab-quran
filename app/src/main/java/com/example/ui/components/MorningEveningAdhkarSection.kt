@@ -37,11 +37,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -311,16 +314,21 @@ object AuthenticAdhkarData {
 fun MorningEveningAdhkarBox() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
+    val backupVersion by remember {
+        com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+    }.collectAsState()
 
     var activeDialogType by remember { mutableStateOf<String?>(null) } // "morning" or "evening"
+    var showHisnCompleteDialog by remember { mutableStateOf(false) }
+    var initialHisnGroupKey by remember { mutableStateOf(HisnSectionGroup.ALL.key) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
-    val morningCompleted = remember(refreshTrigger, activeDialogType) {
+    val morningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
         AuthenticAdhkarData.morningAdhkar.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
     }
-    val eveningCompleted = remember(refreshTrigger, activeDialogType) {
+    val eveningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
         AuthenticAdhkarData.eveningAdhkar.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
@@ -360,13 +368,13 @@ fun MorningEveningAdhkarBox() {
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "حصن المسلم اليومي (الصباح والمساء)",
+                        text = "حصن المسلم (الصباح والمساء والأدعية الكاملة)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = GoldAccent
                     )
                     Text(
-                        text = "الأذكار الصحيحة كاملة مع عداد تكرار وحفظ تلقائي",
+                        text = "أذكار الصباح والمساء + فهرس حصن المسلم كاملاً (١٣٢ باباً أوفلاين مع البحث)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         fontSize = 11.sp
@@ -494,7 +502,108 @@ fun MorningEveningAdhkarBox() {
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            androidx.compose.material3.HorizontalDivider(color = GoldBorder.copy(alpha = 0.4f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search)
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFFF6E7CB),
+                border = BorderStroke(1.2.dp, GoldAccent),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "📖 أدعية وأذكار حصن المسلم كاملة (١٣٢ باباً)",
+                                fontFamily = AmiriFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = Color(0xFF5D3A1A)
+                            )
+                            Text(
+                                text = "جميع أبواب حصن المسلم مقسمة ومرتبة أوفلاين بالكامل مع البحث الفوري",
+                                fontSize = 11.sp,
+                                color = Color(0xFF5D3A1A).copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+
+                    // Quick Section Chips
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        HisnSectionGroup.values().forEach { group ->
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = Color(0xFFFDF6E7),
+                                border = BorderStroke(1.dp, Color(0xFFD6BA8A)),
+                                modifier = Modifier.clickable {
+                                    initialHisnGroupKey = group.key
+                                    showHisnCompleteDialog = true
+                                }
+                            ) {
+                                Text(
+                                    text = group.labelAr,
+                                    color = Color(0xFF5D3A1A),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            initialHisnGroupKey = HisnSectionGroup.ALL.key
+                            showHisnCompleteDialog = true
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("hisn_al_muslim_complete_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RoyalNavyDark,
+                            contentColor = GoldAccent
+                        ),
+                        border = BorderStroke(1.dp, GoldAccent)
+                    ) {
+                        Text(
+                            text = "فتح فهرس حصن المسلم الكامل والبحث في الأدعية (١٣٢ باباً)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+            }
         }
+    }
+
+    if (showHisnCompleteDialog) {
+        HisnAlMuslimCompleteDialog(
+            initialGroupKey = initialHisnGroupKey,
+            onDismiss = {
+                refreshTrigger++
+                showHisnCompleteDialog = false
+            }
+        )
     }
 
     if (activeDialogType != null) {

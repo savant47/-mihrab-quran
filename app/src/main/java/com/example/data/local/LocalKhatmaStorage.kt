@@ -2,6 +2,9 @@ package com.example.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.alarm.MihrabiAlarmManager
+import com.example.alarm.PrayerTimesAndAdhanManager
+import com.example.audio.QuranAudioPlayerManager
 import com.example.data.QuranDataHelper
 import com.example.data.SpiritualMessageItem
 import com.example.data.SpiritualStartupMessageHelper
@@ -17,7 +20,7 @@ import org.json.JSONObject
 /**
  * Local device storage for Mihrabi.
  * Persists all Khatma tracks, reading logs, startup spiritual messages,
- * and supports full local Backup & Restore (.json / clipboard) so progress is never lost on app update.
+ * and supports full local Backup & Restore (.json / clipboard) of all progress and app settings.
  */
 class LocalKhatmaStorage private constructor(context: Context) {
 
@@ -37,6 +40,9 @@ class LocalKhatmaStorage private constructor(context: Context) {
 
     private val _spiritualMessagesFlow = MutableStateFlow(loadSpiritualMessages())
     val spiritualMessagesFlow: StateFlow<List<SpiritualMessageItem>> = _spiritualMessagesFlow.asStateFlow()
+
+    private val _backupRestoreVersionFlow = MutableStateFlow(0)
+    val backupRestoreVersionFlow: StateFlow<Int> = _backupRestoreVersionFlow.asStateFlow()
 
     companion object {
         private const val PREFS_NAME = "quran_companion_local_storage"
@@ -441,47 +447,76 @@ class LocalKhatmaStorage private constructor(context: Context) {
 
     /**
      * Exports all user progress, Khatma tracks, reading logs, startup messages history,
-     * Mushaf bookmarks, and Adhan/Prayer settings into a single JSON string for local backup.
+     * Mushaf reader & Hifz bookmarks, Quran audio reciter & repetition settings,
+     * Adhan & 5-prayer notification modes & custom ringtones, custom Werd/Adhkar alarms,
+     * Electronic Tasbeeh counters, and Morning/Evening Adhkar progress into a single JSON string.
      */
     fun exportFullBackupJson(context: Context): String {
+        val appCtx = context.applicationContext
         val root = JSONObject()
         root.put("app", "محرابي - Mihrabi")
-        root.put("backupFormatVersion", 2)
+        root.put("backupFormatVersion", 3)
         root.put("exportedAtMillis", System.currentTimeMillis())
 
+        // 1. Core Khatma & History Data
         prefs.getString(KEY_GUEST_USER, null)?.let { root.put("guestUserRaw", JSONObject(it)) }
         prefs.getString(KEY_TRACKS, null)?.let { root.put("tracksRaw", JSONArray(it)) }
         prefs.getString(KEY_READING_LOGS, null)?.let { root.put("readingLogsRaw", JSONArray(it)) }
         prefs.getString(KEY_SPIRITUAL_MESSAGES, null)?.let { root.put("spiritualMessagesRaw", JSONArray(it)) }
         root.put("spiritualRotationIndex", prefs.getInt(KEY_SPIRITUAL_ROTATION_INDEX, 0))
+        root.put("companionStoragePrefs", sharedPrefsToJson(prefs))
 
-        // Export quran_reader_prefs (Mushaf page bookmarks per track)
-        val quranPrefs = context.applicationContext.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
+        // 2. Mushaf Reader Preferences (Page bookmarks per track, Hifz memorized Ayahs set, night mode, font size)
+        val quranPrefs = appCtx.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
         root.put("quranReaderPrefs", sharedPrefsToJson(quranPrefs))
 
-        // Export prayer & Adhan settings
-        val prayerPrefs = context.applicationContext.getSharedPreferences("mihrabi_five_prayers_prefs", Context.MODE_PRIVATE)
-        root.put("prayerSettingsPrefs", sharedPrefsToJson(prayerPrefs))
+        // 3. Quran Audio Reciter & Repetition Settings (selected_reciter_id, ayah_repeat_count, auto_advance_next_ayah)
+        val quranAudioPrefs = appCtx.getSharedPreferences("mihrabi_quran_audio_prefs", Context.MODE_PRIVATE)
+        root.put("quranAudioPrefs", sharedPrefsToJson(quranAudioPrefs))
 
-        // Export custom Werd alarms
-        val alarmPrefs = context.applicationContext.getSharedPreferences("mihrabi_alarm_prefs", Context.MODE_PRIVATE)
-        root.put("alarmPrefs", sharedPrefsToJson(alarmPrefs))
+        // 4. Five Daily Prayers & Adhan Settings (location, calculation method, global alert mode, custom Adhan URI/name, per-prayer notification modes)
+        val prayerAdhanPrefs = appCtx.getSharedPreferences("mihrabi_prayer_adhan_prefs", Context.MODE_PRIVATE)
+        root.put("prayerAdhanPrefs", sharedPrefsToJson(prayerAdhanPrefs))
+        // Keep v2 alias for backwards compatibility
+        root.put("prayerSettingsPrefs", sharedPrefsToJson(prayerAdhanPrefs))
+
+        // 5. Custom Werd, Adhkar & Tasbeeh Alarms + Custom Ringtone Settings
+        val alarmsPrefs = appCtx.getSharedPreferences("mihrabi_alarms_prefs", Context.MODE_PRIVATE)
+        root.put("alarmsPrefs", sharedPrefsToJson(alarmsPrefs))
+        // Keep v2 alias for backwards compatibility
+        root.put("alarmPrefs", sharedPrefsToJson(alarmsPrefs))
+
+        // 6. Electronic Tasbeeh Counters
+        val tasbeehPrefs = appCtx.getSharedPreferences("tasbeeh_prefs", Context.MODE_PRIVATE)
+        root.put("tasbeehPrefs", sharedPrefsToJson(tasbeehPrefs))
+
+        // 7. Morning & Evening Adhkar Progress Counters
+        val adhkarPrefs = appCtx.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE)
+        root.put("morningEveningAdhkarPrefs", sharedPrefsToJson(adhkarPrefs))
 
         return root.toString(2)
     }
 
     /**
-     * Imports a previously exported JSON backup and immediately updates all active StateFlows.
+     * Imports a previously exported JSON backup, restores all SharedPreferences stores,
+     * reschedules all 5 Prayer Adhan notifications and custom alarms, re-initializes Quran audio
+     * reciter & repetition settings, and immediately updates all active StateFlows.
      */
     fun importFullBackupJson(context: Context, jsonString: String): Result<String> {
         return try {
+            val appCtx = context.applicationContext
             val cleaned = jsonString.trim()
             if (cleaned.isEmpty()) {
                 return Result.failure(IllegalArgumentException("ملف النسخة الاحتياطية فارغ."))
             }
             val root = JSONObject(cleaned)
-            val editor = prefs.edit()
 
+            // 1. Restore companionStoragePrefs if present, plus explicit raw keys
+            if (root.has("companionStoragePrefs")) {
+                jsonToSharedPrefs(root.getJSONObject("companionStoragePrefs"), prefs)
+            }
+
+            val editor = prefs.edit()
             var restoredTracksCount = 0
             var restoredLogsCount = 0
 
@@ -507,32 +542,81 @@ class LocalKhatmaStorage private constructor(context: Context) {
             }
             editor.commit()
 
+            // 2. Restore Mushaf Reader Preferences (bookmarks, Hifz marks, night mode, font scale)
             if (root.has("quranReaderPrefs")) {
-                val quranPrefs = context.applicationContext.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
+                val quranPrefs = appCtx.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE)
                 jsonToSharedPrefs(root.getJSONObject("quranReaderPrefs"), quranPrefs)
             }
-            if (root.has("prayerSettingsPrefs")) {
-                val prayerPrefs = context.applicationContext.getSharedPreferences("mihrabi_five_prayers_prefs", Context.MODE_PRIVATE)
-                jsonToSharedPrefs(root.getJSONObject("prayerSettingsPrefs"), prayerPrefs)
+
+            // 3. Restore Quran Audio Reciter & Repetition Preferences
+            if (root.has("quranAudioPrefs")) {
+                val quranAudioPrefs = appCtx.getSharedPreferences("mihrabi_quran_audio_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("quranAudioPrefs"), quranAudioPrefs)
             }
-            if (root.has("alarmPrefs")) {
-                val alarmPrefs = context.applicationContext.getSharedPreferences("mihrabi_alarm_prefs", Context.MODE_PRIVATE)
-                jsonToSharedPrefs(root.getJSONObject("alarmPrefs"), alarmPrefs)
+            QuranAudioPlayerManager.initPreferences(appCtx)
+
+            // 4. Restore Prayer Times & Adhan Settings (location, calculation method, per-prayer notifications, custom Adhan tone)
+            val prayerAdhanJson = when {
+                root.has("prayerAdhanPrefs") -> root.getJSONObject("prayerAdhanPrefs")
+                root.has("prayerSettingsPrefs") -> root.getJSONObject("prayerSettingsPrefs")
+                else -> null
+            }
+            if (prayerAdhanJson != null) {
+                val prayerAdhanPrefs = appCtx.getSharedPreferences("mihrabi_prayer_adhan_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(prayerAdhanJson, prayerAdhanPrefs)
+                // Also mirror to legacy name if anything reads it
+                val legacyPrayerPrefs = appCtx.getSharedPreferences("mihrabi_five_prayers_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(prayerAdhanJson, legacyPrayerPrefs)
+            }
+            PrayerTimesAndAdhanManager.scheduleAllFivePrayers(appCtx)
+
+            // 5. Restore Custom Werd & Adhkar Alarms and Ringtones
+            val alarmsJson = when {
+                root.has("alarmsPrefs") -> root.getJSONObject("alarmsPrefs")
+                root.has("alarmPrefs") -> root.getJSONObject("alarmPrefs")
+                else -> null
+            }
+            if (alarmsJson != null) {
+                val alarmsPrefs = appCtx.getSharedPreferences("mihrabi_alarms_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(alarmsJson, alarmsPrefs)
+                val legacyAlarmPrefs = appCtx.getSharedPreferences("mihrabi_alarm_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(alarmsJson, legacyAlarmPrefs)
+            }
+            MihrabiAlarmManager.rescheduleAllEnabledAlarms(appCtx)
+
+            // 6. Restore Electronic Tasbeeh Counters
+            if (root.has("tasbeehPrefs")) {
+                val tasbeehPrefs = appCtx.getSharedPreferences("tasbeeh_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("tasbeehPrefs"), tasbeehPrefs)
             }
 
-            // Refresh all StateFlows immediately so UI reflects restored progress right away
+            // 7. Restore Morning & Evening Adhkar Progress
+            if (root.has("morningEveningAdhkarPrefs")) {
+                val adhkarPrefs = appCtx.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("morningEveningAdhkarPrefs"), adhkarPrefs)
+            }
+
+            // Refresh all StateFlows immediately so UI reflects restored progress & settings right away
             _guestUserFlow.value = loadGuestUser()
             val loadedTracks = loadTracks()
             _tracksFlow.value = loadedTracks
             val loadedLogs = loadReadingLogs()
             _readingLogsFlow.value = loadedLogs
             _spiritualMessagesFlow.value = loadSpiritualMessages()
+            _backupRestoreVersionFlow.value += 1
 
             val mainTrack = loadedTracks.firstOrNull()
+            val restoredAdhan = PrayerTimesAndAdhanManager.loadSettings(appCtx)
+            val restoredAudio = QuranAudioPlayerManager.playbackState.value
+            val repeatLabel = if (restoredAudio.targetRepeatCount == -1) "تكرار مستمر" else "${restoredAudio.targetRepeatCount}x"
+
             val summary = if (mainTrack != null) {
-                "تمت استعادة النسخة الاحتياطية بنجاح (${loadedTracks.size} ورد • ${loadedLogs.size} سجل قراءة • التوقف عند سورة ${mainTrack.currentSurah} صفحة ${mainTrack.currentPage})"
+                "تمت استعادة النسخة الاحتياطية الكاملة بنجاح:\n" +
+                    "• الختمة: سورة ${mainTrack.currentSurah} (صفحة ${mainTrack.currentPage}) • ${loadedTracks.size} ورد و ${loadedLogs.size} سجل\n" +
+                    "• المصحف والتلاوة: القارئ ${restoredAudio.selectedReciter.nameAr} (التكرار: $repeatLabel)\n" +
+                    "• الأذان والصلاة: ${restoredAdhan.locationName} (${restoredAdhan.globalAlertMode.titleAr}) وإعدادات الصلوات الخمس والمنبهات"
             } else {
-                "تمت استعادة النسخة الاحتياطية بنجاح ($restoredTracksCount ورد و $restoredLogsCount سجل)."
+                "تمت استعادة النسخة الاحتياطية الكاملة بنجاح ($restoredTracksCount ورد، $restoredLogsCount سجل، وإعدادات الأذان والقارئ والمنبهات)."
             }
             Result.success(summary)
         } catch (e: Exception) {
@@ -566,6 +650,14 @@ class LocalKhatmaStorage private constructor(context: Context) {
                     entry.put("type", "string")
                     entry.put("val", value)
                 }
+                is Set<*> -> {
+                    val arr = JSONArray()
+                    value.forEach { item ->
+                        if (item is String) arr.put(item)
+                    }
+                    entry.put("type", "string_set")
+                    entry.put("val", arr)
+                }
             }
             if (entry.has("type")) {
                 obj.put(key, entry)
@@ -586,6 +678,16 @@ class LocalKhatmaStorage private constructor(context: Context) {
                 "long" -> editor.putLong(key, entry.optLong("val"))
                 "float" -> editor.putFloat(key, entry.optDouble("val").toFloat())
                 "string" -> editor.putString(key, entry.optString("val"))
+                "string_set" -> {
+                    val arr = entry.optJSONArray("val")
+                    val set = mutableSetOf<String>()
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            set.add(arr.optString(i))
+                        }
+                    }
+                    editor.putStringSet(key, set)
+                }
             }
         }
         editor.commit()

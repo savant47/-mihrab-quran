@@ -97,14 +97,17 @@ fun QuranReaderScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val quranPrefs = remember { context.getSharedPreferences("quran_reader_prefs", Context.MODE_PRIVATE) }
+    val backupVersion by remember {
+        com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+    }.collectAsState()
 
     val audioPlaybackState by QuranAudioPlayerManager.playbackState.collectAsState()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(backupVersion) {
         QuranAudioPlayerManager.initPreferences(context)
     }
 
-    val savedLastPage = remember(activeTrackId) {
+    val savedLastPage = remember(activeTrackId, backupVersion) {
         quranPrefs.getInt("last_viewed_page_$activeTrackId", initialPage.coerceIn(1, 604)).coerceIn(1, 604)
     }
 
@@ -114,7 +117,7 @@ fun QuranReaderScreen(
         isDatabaseReady = true
     }
 
-    val startPage = remember(activeTrackId, initialPage) {
+    val startPage = remember(activeTrackId, initialPage, backupVersion) {
         if (initialPage in 1..604) initialPage else savedLastPage
     }
 
@@ -126,13 +129,13 @@ fun QuranReaderScreen(
     val currentPage = pagerState.currentPage + 1
 
     // Reader customization states
-    var isNightMushafMode by remember {
+    var isNightMushafMode by remember(backupVersion) {
         mutableStateOf(quranPrefs.getBoolean("night_mushaf_mode", false))
     }
-    var isAyahByAyahMode by remember {
+    var isAyahByAyahMode by remember(backupVersion) {
         mutableStateOf(quranPrefs.getBoolean("ayah_by_ayah_mode", false))
     }
-    var fontScaleSp by remember {
+    var fontScaleSp by remember(backupVersion) {
         mutableFloatStateOf(quranPrefs.getFloat("mushaf_font_size_sp_v2", 28f).coerceIn(20f, 38f))
     }
 
@@ -142,18 +145,18 @@ fun QuranReaderScreen(
     }
 
     // Track current stop bookmark (Surah & Ayah)
-    var bookmarkedSurah by remember(activeTrackId) {
+    var bookmarkedSurah by remember(activeTrackId, backupVersion) {
         mutableStateOf(quranPrefs.getString("last_read_surah_$activeTrackId", "الفاتحة") ?: "الفاتحة")
     }
-    var bookmarkedAyah by remember(activeTrackId) {
+    var bookmarkedAyah by remember(activeTrackId, backupVersion) {
         mutableIntStateOf(quranPrefs.getInt("last_read_ayah_$activeTrackId", 1))
     }
-    var bookmarkedPage by remember(activeTrackId) {
+    var bookmarkedPage by remember(activeTrackId, backupVersion) {
         mutableIntStateOf(quranPrefs.getInt("last_read_page_$activeTrackId", startPage))
     }
 
     // Hifz (Memorized / Saved Ayahs) set stored in SharedPreferences
-    var memorizedAyahKeys by remember {
+    var memorizedAyahKeys by remember(backupVersion) {
         mutableStateOf(
             quranPrefs.getStringSet("memorized_ayahs_set", emptySet())?.toSet() ?: emptySet()
         )
@@ -2355,15 +2358,37 @@ private fun MushafPageContent(
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 if (v.tafsirMuyassar.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "التفسير الميسر: ${v.tafsirMuyassar}",
-                                        fontSize = 13.sp,
-                                        lineHeight = 20.sp,
-                                        color = secondaryTextColor,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isNightMode) Color(0xFF0E1D2F).copy(alpha = 0.85f)
+                                        else Color(0xFFEDE2CC).copy(alpha = 0.72f),
+                                        border = BorderStroke(0.8.dp, GoldBorder.copy(alpha = 0.55f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        ) {
+                                            Text(
+                                                text = "📖 التفسير الميسر:",
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (isNightMode) GoldAccent else EmeraldGreen
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = v.tafsirMuyassar,
+                                                fontSize = 16.5.sp,
+                                                lineHeight = 26.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isNightMode) Color(0xFFFDF8EE) else Color(0xFF1F160A),
+                                                textAlign = TextAlign.Right,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

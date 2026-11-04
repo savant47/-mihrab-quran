@@ -70,8 +70,13 @@ private const val KAABA_LON = 39.826206
 fun PrayerAndQiblaScreen() {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val backupVersion by remember {
+        com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+    }.collectAsState()
 
-    var settings by remember { mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context)) }
+    var settings by remember(backupVersion) {
+        mutableStateOf(PrayerTimesAndAdhanManager.loadSettings(context))
+    }
     var isDetectingGps by remember { mutableStateOf(false) }
     var showOfflineCitySheet by remember { mutableStateOf(false) }
 

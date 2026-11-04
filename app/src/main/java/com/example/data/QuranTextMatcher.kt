@@ -20,7 +20,7 @@ object QuranTextMatcher {
         val pageNumber: Int
     )
 
-    private val tashkeelAndQuranSymbolsRegex = Regex("[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u06E6\\u06DF\\u06E0\\u06E2\\u06E3\\u06E5\\u06E6]")
+    private val tashkeelAndQuranSymbolsRegex = Regex("[\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u06E6\\u06DF\\u06E0\\u06E1\\u06E2\\u06E3\\u06E5\\u06E6]")
     private val nonArabicLettersRegex = Regex("[^\\u0621-\\u064A\\s0-9]")
 
     fun convertArabicDigitsToAscii(input: String): String {
@@ -42,11 +42,23 @@ object QuranTextMatcher {
             .replace('إ', 'ا')
             .replace('آ', 'ا')
             .replace('ٱ', 'ا')
+            .replace('ؤ', 'و')
+            .replace('ئ', 'ي')
             .replace('ة', 'ه')
             .replace('ى', 'ي')
-            .replace('ـ', ' ') // remove tatweel
         text = text.replace(nonArabicLettersRegex, " ")
         return text.replace(Regex("\\s+"), " ").trim()
+    }
+
+    /**
+     * Converts a normalized Arabic word to an Alef/Hamza-agnostic Uthmani skeleton
+     * so Uthmani script (e.g. "الكتب", "سبحن", "الصلحت", "عظما", "رفتا", "السموت")
+     * matches standard Arabic ("الكتاب", "سبحان", "الصالحات", "عظاما", "رفاتا", "السماوات") identically.
+     */
+    fun toUthmaniSkeleton(word: String): String {
+        val clean = word.replace("ء", "").trim()
+        if (clean.length <= 2) return clean
+        return clean[0] + clean.substring(1).replace("ا", "")
     }
 
     private val citationBracketRegex = Regex(
@@ -329,9 +341,15 @@ object QuranTextMatcher {
         }
 
         // 4. Check if user typed or pasted Surah name directly (e.g., "سورة البقرة" or "الكهف")
-        for (surah in QuranDataHelper.surahs) {
+        // Require explicit "سوره <Surah>" prefix OR short query matching a standalone Surah name
+        val normWords = normalized.split(" ").filter { it.isNotBlank() }
+        for (surah in QuranDataHelper.surahs.sortedByDescending { it.nameArabic.length }) {
             val normalizedSurah = normalizeArabic(surah.nameArabic)
-            if (normalized.contains(normalizedSurah)) {
+            val explicitPrefix = normalized.contains("سوره $normalizedSurah")
+            val isExactShortQuery = normalized == normalizedSurah ||
+                (normalizedSurah.length >= 4 && normWords.size <= 3 && normWords.contains(normalizedSurah))
+
+            if (explicitPrefix || isExactShortQuery) {
                 val convertedAscii = convertArabicDigitsToAscii(trimmed)
                 val digits = Regex("\\d+").findAll(convertedAscii)
                     .mapNotNull { it.value.toIntOrNull() }
@@ -378,7 +396,7 @@ object QuranTextMatcher {
 
     /**
      * Context-aware matcher that searches all 6,236 Quran verses in OfflineQuranDatabase
-     * in addition to fast regex & popular Ayah matching.
+     * using both normalized text and Alef-agnostic Uthmani skeletons.
      */
     fun findAyahMatch(context: android.content.Context, rawText: String): MatchResult? {
         val fastMatch = findAyahMatch(rawText)
@@ -389,10 +407,15 @@ object QuranTextMatcher {
         if (normalized.length < 4) return null
 
         val allVerses = OfflineQuranDatabase.getAllVerses(context)
-        // 1. Direct substring match across all 6,236 verses
+        val inputSkeleton = normalized.split(" ").joinToString(" ") { toUthmaniSkeleton(it) }
+
+        // 1. Direct or Uthmani-skeleton substring match across all 6,236 verses
         for (v in allVerses) {
+            val vSkeleton = v.normalizedTextAr.split(" ").joinToString(" ") { toUthmaniSkeleton(it) }
             if ((normalized.length >= 8 && v.normalizedTextAr.contains(normalized)) ||
-                (v.normalizedTextAr.length >= 10 && normalized.contains(v.normalizedTextAr))) {
+                (v.normalizedTextAr.length >= 10 && normalized.contains(v.normalizedTextAr)) ||
+                (inputSkeleton.length >= 8 && vSkeleton.contains(inputSkeleton))
+            ) {
                 return MatchResult(
                     surahName = v.surahNameAr,
                     ayahNumber = v.ayahNumber,
@@ -402,17 +425,27 @@ object QuranTextMatcher {
             }
         }
 
-        // 2. Word overlap across all 6,236 verses
+        // 2. Word & Uthmani-skeleton overlap across all 6,236 verses
         val inputWords = normalized.split(" ").filter { it.length >= 3 && !stopWords.contains(it) }
+        val inputSkels = inputWords.map { toUthmaniSkeleton(it) }.filter { it.length >= 3 }.toSet()
         if (inputWords.size >= 2) {
             var bestScore = 0
             var bestVerse: OfflineVerse? = null
             for (v in allVerses) {
                 var score = 0
+                val vWords = v.normalizedTextAr.split(" ")
+                val vSkels = vWords.map { toUthmaniSkeleton(it) }.toSet()
                 for (w in inputWords) {
-                    if (v.normalizedTextAr.contains(w)) score++
+                    val wSkel = toUthmaniSkeleton(w)
+                    if (vWords.contains(w)) {
+                        score += 3
+                    } else if (wSkel.length >= 3 && vSkels.contains(wSkel)) {
+                        score += 2
+                    } else if (v.normalizedTextAr.contains(w)) {
+                        score += 1
+                    }
                 }
-                if (score > bestScore && score >= 2) {
+                if (score > bestScore && score >= 4) {
                     bestScore = score
                     bestVerse = v
                 }
