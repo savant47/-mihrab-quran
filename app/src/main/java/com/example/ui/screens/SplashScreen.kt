@@ -227,28 +227,32 @@ fun SplashScreen(
             )
         }
 
-        // Bottom Attribution & Dedication
+        // Bottom Attribution & Dedication (Balanced 2-Line Waqf Banner)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp, start = 16.dp, end = 16.dp),
+                .fillMaxWidth()
+                .padding(bottom = 24.dp, start = 12.dp, end = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "إعداد آسر الشربيني",
+                text = "إعداد: آسر الشربيني • وقفٌ لله تعالى وصدقةٌ جارية عني وعن والديّ",
                 fontFamily = AmiriFontFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = GoldLight.copy(alpha = 0.85f),
-                textAlign = TextAlign.Center
+                fontSize = 13.sp,
+                color = GoldLight.copy(alpha = 0.92f),
+                textAlign = TextAlign.Center,
+                maxLines = 1
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
-                text = "وقف لله تعالى - لا تنسونا من خالص الدعاء لأبي وأمي",
+                text = "اللهم اغفر لأبي وارحمه، وأدم على أمي الصحة والعافية وطول العمر في طاعتك ورضاك",
                 fontFamily = AmiriFontFamily,
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.65f),
-                textAlign = TextAlign.Center
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.5.sp,
+                color = Color.White.copy(alpha = 0.80f),
+                textAlign = TextAlign.Center,
+                maxLines = 1
             )
         }
     }

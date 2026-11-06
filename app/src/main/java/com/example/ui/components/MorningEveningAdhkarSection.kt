@@ -900,11 +900,11 @@ fun MorningEveningAdhkarBox() {
             androidx.compose.material3.HorizontalDivider(color = GoldBorder.copy(alpha = 0.4f))
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search)
+            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search) — Unified Royal Navy & Emerald Theme
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFFF6E7CB),
-                border = BorderStroke(1.2.dp, GoldAccent),
+                color = Color(0xFF162C4E),
+                border = BorderStroke(1.2.dp, GoldBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -924,12 +924,12 @@ fun MorningEveningAdhkarBox() {
                                 fontFamily = AmiriFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 17.sp,
-                                color = Color(0xFF5D3A1A)
+                                color = GoldAccent
                             )
                             Text(
                                 text = "جميع أبواب حصن المسلم مقسمة ومرتبة أوفلاين بالكامل مع البحث الفوري",
                                 fontSize = 11.sp,
-                                color = Color(0xFF5D3A1A).copy(alpha = 0.85f)
+                                color = Color(0xFFF8FAF2).copy(alpha = 0.85f)
                             )
                         }
                     }
@@ -944,8 +944,8 @@ fun MorningEveningAdhkarBox() {
                         HisnSectionGroup.values().forEach { group ->
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = Color(0xFFFDF6E7),
-                                border = BorderStroke(1.dp, Color(0xFFD6BA8A)),
+                                color = RoyalNavyDark,
+                                border = BorderStroke(1.dp, GoldBorder),
                                 modifier = Modifier.clickable {
                                     initialHisnGroupKey = group.key
                                     showHisnCompleteDialog = true
@@ -953,7 +953,7 @@ fun MorningEveningAdhkarBox() {
                             ) {
                                 Text(
                                     text = group.labelAr,
-                                    color = Color(0xFF5D3A1A),
+                                    color = GoldAccent,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -973,15 +973,16 @@ fun MorningEveningAdhkarBox() {
                             .testTag("hisn_al_muslim_complete_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = RoyalNavyDark,
-                            contentColor = GoldAccent
+                            containerColor = EmeraldGreen,
+                            contentColor = Color.White
                         ),
                         border = BorderStroke(1.dp, GoldAccent)
                     ) {
                         Text(
                             text = "فتح فهرس حصن المسلم الكامل والبحث في الأدعية (١٣٢ باباً)",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp
+                            fontSize = 12.5.sp,
+                            color = Color.White
                         )
                     }
                 }

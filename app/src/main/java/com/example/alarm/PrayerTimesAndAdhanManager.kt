@@ -104,14 +104,39 @@ object PrayerTimesAndAdhanManager {
     const val ACTION_TRIGGER_PRAYER_ADHAN = "com.example.ACTION_TRIGGER_PRAYER_ADHAN"
 
     val presetCities = listOf(
+        CityPreset("العريش - شمال سيناء، مصر", 31.1316, 33.7984),
+        CityPreset("بئر العبد - شمال سيناء، مصر", 31.0189, 33.0100),
+        CityPreset("الشيخ زويد - شمال سيناء، مصر", 31.2119, 34.1106),
+        CityPreset("رفح - شمال سيناء، مصر", 31.2870, 34.2380),
         CityPreset("القاهرة، مصر", 30.0444, 31.2357),
+        CityPreset("الجيزة، مصر", 30.0131, 31.2089),
+        CityPreset("الإسكندرية، مصر", 31.2001, 29.9187),
+        CityPreset("بورسعيد، مصر", 31.2653, 32.3019),
+        CityPreset("الإسماعيلية، مصر", 30.5965, 32.2715),
+        CityPreset("السويس، مصر", 29.9668, 32.5498),
+        CityPreset("دمياط، مصر", 31.4175, 31.8144),
+        CityPreset("المنصورة - الدقهلية، مصر", 31.0409, 31.3785),
+        CityPreset("الزقازيق - الشرقية، مصر", 30.5877, 31.5020),
+        CityPreset("طنطا - الغربية، مصر", 30.7865, 31.0004),
+        CityPreset("شبين الكوم - المنوفية، مصر", 30.5503, 31.0106),
+        CityPreset("بنها - القليوبية، مصر", 30.4660, 31.1848),
+        CityPreset("دمنهور - البحيرة، مصر", 31.0341, 30.4682),
+        CityPreset("كفر الشيخ، مصر", 31.1107, 30.9388),
+        CityPreset("مرسى مطروح، مصر", 31.3543, 27.2373),
+        CityPreset("طور سيناء - جنوب سيناء، مصر", 28.2417, 33.6222),
+        CityPreset("شرم الشيخ - جنوب سيناء، مصر", 27.9158, 34.3300),
+        CityPreset("الفيوم، مصر", 29.3084, 30.8428),
+        CityPreset("بني سويف، مصر", 29.0661, 31.0994),
+        CityPreset("المنيا، مصر", 28.1099, 30.7503),
+        CityPreset("أسيوط، مصر", 27.1783, 31.1859),
+        CityPreset("سوهاج، مصر", 26.5591, 31.6957),
+        CityPreset("قنا، مصر", 26.1551, 32.7160),
+        CityPreset("الأقصر، مصر", 25.6872, 32.6396),
+        CityPreset("أسوان، مصر", 24.0889, 32.8998),
+        CityPreset("الغردقة - البحر الأحمر، مصر", 27.2579, 33.8116),
+        CityPreset("الخارجة - الوادي الجديد، مصر", 25.4390, 30.5586),
         CityPreset("مكة المكرمة، السعودية", 21.4225, 39.8262),
         CityPreset("المدينة المنورة، السعودية", 24.4672, 39.6112),
-        CityPreset("الإسكندرية، مصر", 31.2001, 29.9187),
-        CityPreset("المنصورة، مصر", 31.0409, 31.3785),
-        CityPreset("طنطا، مصر", 30.7865, 31.0004),
-        CityPreset("أسيوط، مصر", 27.1783, 31.1859),
-        CityPreset("أسوان، مصر", 24.0889, 32.8998),
         CityPreset("الرياض، السعودية", 24.7136, 46.6753),
         CityPreset("جدة، السعودية", 21.5433, 39.1728),
         CityPreset("الدمام، السعودية", 26.4207, 50.0888),
@@ -119,16 +144,86 @@ object PrayerTimesAndAdhanManager {
         CityPreset("أبوظبي، الإمارات", 24.4539, 54.3773),
         CityPreset("الكويت، الكويت", 29.3759, 47.9774),
         CityPreset("الدوحة، قطر", 25.2854, 51.5310),
+        CityPreset("المنامة، البحرين", 26.2285, 50.5860),
+        CityPreset("مسقط، عُمان", 23.5880, 58.3829),
         CityPreset("عمان، الأردن", 31.9454, 35.9284),
         CityPreset("القدس الشريف، فلسطين", 31.7683, 35.2137),
+        CityPreset("غزة، فلسطين", 31.5017, 34.4668),
         CityPreset("بغداد، العراق", 33.3152, 44.3661),
         CityPreset("دمشق، سوريا", 33.5138, 36.2765),
+        CityPreset("بيروت، لبنان", 33.8938, 35.5018),
+        CityPreset("صنعاء، اليمن", 15.3694, 44.1910),
         CityPreset("الخرطوم، السودان", 15.5007, 32.5599),
         CityPreset("طرابلس، ليبيا", 32.8872, 13.1913),
+        CityPreset("بنغازي، ليبيا", 32.1194, 20.0868),
         CityPreset("تونس، تونس", 36.8065, 10.1815),
         CityPreset("الجزائر، الجزائر", 36.7538, 3.0588),
-        CityPreset("الدار البيضاء، المغرب", 33.5731, -7.5898)
+        CityPreset("الدار البيضاء، المغرب", 33.5731, -7.5898),
+        CityPreset("الرباط، المغرب", 34.0209, -6.8416),
+        CityPreset("إسطنبول، تركيا", 41.0082, 28.9784),
+        CityPreset("لندن، المملكة المتحدة", 51.5074, -0.1278),
+        CityPreset("باريس، فرنسا", 48.8566, 2.3522),
+        CityPreset("برلين، ألمانيا", 52.5200, 13.4050),
+        CityPreset("نيويورك، الولايات المتحدة", 40.7128, -74.0060),
+        CityPreset("كوالالمبور، ماليزيا", 3.1390, 101.6869),
+        CityPreset("جاكرتا، إندونيسيا", -6.2088, 106.8456)
     )
+
+    /**
+     * Cleans administrative police/census prefixes (such as "قسم اول العريش" or "Qism Awal Al Arish")
+     * into eloquent Arabic city + governorate names ("العريش - شمال سيناء، مصر").
+     */
+    fun normalizeArabicCityDisplayName(
+        rawCity: String,
+        adminArea: String = "",
+        country: String = ""
+    ): String {
+        val combinedCheck = "$rawCity $adminArea $country".lowercase(Locale.ROOT)
+        if (combinedCheck.contains("العريش") || combinedCheck.contains("عريش") || combinedCheck.contains("arish")) {
+            return "العريش - شمال سيناء، مصر"
+        }
+        if (combinedCheck.contains("الشيخ زويد") || combinedCheck.contains("sheikh zuweid")) {
+            return "الشيخ زويد - شمال سيناء، مصر"
+        }
+        if (combinedCheck.contains("بئر العبد") || combinedCheck.contains("bir al-abd")) {
+            return "بئر العبد - شمال سيناء، مصر"
+        }
+
+        var cleanedCity = rawCity
+            .replace(Regex("^(قسم\\s*(أول|اول|ثان|ثاني|ثالث|رابع|[1-4]|١|٢|٣|٤)\\s+)"), "")
+            .replace(Regex("^(مركز\\s+|حي\\s+|مدينة\\s+)"), "")
+            .replace(Regex("(?i)^(qism\\s*(awal|thani|thalith)?\\s+|markaz\\s+)"), "")
+            .trim()
+
+        val cleanedAdmin = adminArea
+            .replace("محافظة ", "")
+            .replace("Governorate", "", ignoreCase = true)
+            .trim()
+
+        val cleanedCountry = when {
+            country.equals("Egypt", ignoreCase = true) -> "مصر"
+            country.equals("Saudi Arabia", ignoreCase = true) -> "السعودية"
+            else -> country.trim()
+        }
+
+        if (cleanedCity.isBlank() && cleanedAdmin.isNotBlank()) {
+            cleanedCity = cleanedAdmin
+        }
+
+        return when {
+            cleanedCity.isNotBlank() && cleanedAdmin.isNotBlank() &&
+                    !cleanedCity.contains(cleanedAdmin) && cleanedCountry.isNotBlank() &&
+                    !cleanedCity.contains(cleanedCountry) -> {
+                "$cleanedCity - $cleanedAdmin، $cleanedCountry"
+            }
+            cleanedCity.isNotBlank() && cleanedCountry.isNotBlank() && !cleanedCity.contains(cleanedCountry) -> {
+                "$cleanedCity، $cleanedCountry"
+            }
+            cleanedCity.isNotBlank() -> cleanedCity
+            cleanedCountry.isNotBlank() -> cleanedCountry
+            else -> "القاهرة، مصر"
+        }
+    }
 
     fun loadSettings(context: Context): AdhanSettingsState {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -160,10 +255,13 @@ object PrayerTimesAndAdhanManager {
                 }
             }
 
+            val rawLocName = obj.optString("locationName", "القاهرة، مصر")
+            val normalizedLocName = normalizeArabicCityDisplayName(rawLocName)
+
             AdhanSettingsState(
                 latitude = obj.optDouble("latitude", 30.0444),
                 longitude = obj.optDouble("longitude", 31.2357),
-                locationName = obj.optString("locationName", "القاهرة، مصر"),
+                locationName = normalizedLocName,
                 isAutoLocation = obj.optBoolean("isAutoLocation", true),
                 calculationMethod = method,
                 globalAlertMode = globalMode,
@@ -179,19 +277,22 @@ object PrayerTimesAndAdhanManager {
 
     fun saveSettingsAndSchedule(context: Context, state: AdhanSettingsState) {
         try {
+            val normalizedState = state.copy(
+                locationName = normalizeArabicCityDisplayName(state.locationName)
+            )
             val modesObj = JSONObject()
-            state.perPrayerModes.forEach { (k, v) ->
+            normalizedState.perPrayerModes.forEach { (k, v) ->
                 modesObj.put(k.name, v.name)
             }
             val obj = JSONObject().apply {
-                put("latitude", state.latitude)
-                put("longitude", state.longitude)
-                put("locationName", state.locationName)
-                put("isAutoLocation", state.isAutoLocation)
-                put("calculationMethod", state.calculationMethod.name)
-                put("globalAlertMode", state.globalAlertMode.name)
-                put("customAdhanUri", state.customAdhanUri)
-                put("customAdhanFileName", state.customAdhanFileName)
+                put("latitude", normalizedState.latitude)
+                put("longitude", normalizedState.longitude)
+                put("locationName", normalizedState.locationName)
+                put("isAutoLocation", normalizedState.isAutoLocation)
+                put("calculationMethod", normalizedState.calculationMethod.name)
+                put("globalAlertMode", normalizedState.globalAlertMode.name)
+                put("customAdhanUri", normalizedState.customAdhanUri)
+                put("customAdhanFileName", normalizedState.customAdhanFileName)
                 put("perPrayerModes", modesObj)
             }
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -199,10 +300,172 @@ object PrayerTimesAndAdhanManager {
                 .putString(KEY_SETTINGS_JSON, obj.toString())
                 .apply()
 
-            scheduleAllFivePrayers(context, state)
+            scheduleAllFivePrayers(context, normalizedState)
+            syncOfficialTimingsFromAlAdhanApi(context, normalizedState)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving Adhan settings", e)
         }
+    }
+
+    /**
+     * Searches for any city worldwide (Online via Open-Meteo Arabic Geocoding API + Android Geocoder + Offline Presets).
+     */
+    fun searchCitiesWorldwide(
+        context: Context,
+        query: String,
+        onResults: (List<CityPreset>) -> Unit
+    ) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            onResults(presetCities)
+            return
+        }
+
+        val localMatches = presetCities.filter {
+            it.nameAr.contains(trimmed, ignoreCase = true)
+        }
+        // Immediately return local matches first for instant UI responsiveness
+        if (localMatches.isNotEmpty()) {
+            onResults(localMatches)
+        }
+
+        Thread {
+            val combined = LinkedHashMap<String, CityPreset>()
+            for (preset in localMatches) {
+                combined[preset.nameAr] = preset
+            }
+
+            // 1. Query Open-Meteo Global Geocoding API in Arabic
+            try {
+                val encoded = java.net.URLEncoder.encode(trimmed, "UTF-8")
+                val url = java.net.URL("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=15&language=ar&format=json")
+                val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 4500
+                    readTimeout = 4500
+                    requestMethod = "GET"
+                }
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val root = JSONObject(body)
+                    val resultsArr = root.optJSONArray("results")
+                    if (resultsArr != null) {
+                        for (i in 0 until resultsArr.length()) {
+                            val item = resultsArr.getJSONObject(i)
+                            val name = item.optString("name", "")
+                            val admin1 = item.optString("admin1", "")
+                            val country = item.optString("country", "")
+                            val lat = item.optDouble("latitude", Double.NaN)
+                            val lon = item.optDouble("longitude", Double.NaN)
+                            if (name.isNotBlank() && !lat.isNaN() && !lon.isNaN()) {
+                                val display = normalizeArabicCityDisplayName(name, admin1, country)
+                                if (!combined.containsKey(display)) {
+                                    combined[display] = CityPreset(display, lat, lon)
+                                }
+                            }
+                        }
+                    }
+                }
+                conn.disconnect()
+            } catch (_: Exception) {
+            }
+
+            // 2. Fallback/Supplement with Android Geocoder
+            if (combined.size < 5) {
+                try {
+                    val geocoder = Geocoder(context, Locale("ar"))
+                    @Suppress("DEPRECATION")
+                    val list = geocoder.getFromLocationName(trimmed, 6)
+                    if (!list.isNullOrEmpty()) {
+                        for (addr in list) {
+                            if (addr.hasLatitude() && addr.hasLongitude()) {
+                                val cName = addr.locality ?: addr.subAdminArea ?: addr.featureName ?: trimmed
+                                val admin = addr.adminArea ?: ""
+                                val country = addr.countryName ?: ""
+                                val display = normalizeArabicCityDisplayName(cName, admin, country)
+                                if (!combined.containsKey(display)) {
+                                    combined[display] = CityPreset(display, addr.latitude, addr.longitude)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            val finalResults = combined.values.toList()
+            Handler(Looper.getMainLooper()).post {
+                onResults(finalResults)
+            }
+        }.start()
+    }
+
+    /**
+     * Syncs official daily prayer times from AlAdhan API when online and caches them for today's date & coordinates.
+     * Falls back seamlessly to the local astronomical calculator when offline.
+     */
+    fun syncOfficialTimingsFromAlAdhanApi(
+        context: Context,
+        settings: AdhanSettingsState,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        Thread {
+            var synced = false
+            try {
+                val cal = Calendar.getInstance()
+                val dateKey = String.format(
+                    Locale.US,
+                    "%04d-%02d-%02d_%.2f_%.2f_%s",
+                    cal.get(Calendar.YEAR),
+                    cal.get(Calendar.MONTH) + 1,
+                    cal.get(Calendar.DAY_OF_MONTH),
+                    settings.latitude,
+                    settings.longitude,
+                    settings.calculationMethod.name
+                )
+                val methodId = when (settings.calculationMethod) {
+                    CalculationMethod.EGYPTIAN_SURVEY -> 5
+                    CalculationMethod.UMM_AL_QURA -> 4
+                    CalculationMethod.MUSLIM_WORLD_LEAGUE -> 3
+                    CalculationMethod.KARACHI -> 1
+                }
+                val urlStr = String.format(
+                    Locale.US,
+                    "https://api.aladhan.com/v1/timings?latitude=%.4f&longitude=%.4f&method=%d",
+                    settings.latitude,
+                    settings.longitude,
+                    methodId
+                )
+                val conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 4500
+                    readTimeout = 4500
+                    requestMethod = "GET"
+                }
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val timings = JSONObject(body).optJSONObject("data")?.optJSONObject("timings")
+                    if (timings != null) {
+                        val cacheObj = JSONObject().apply {
+                            put("dateKey", dateKey)
+                            put("Fajr", timings.optString("Fajr", ""))
+                            put("Dhuhr", timings.optString("Dhuhr", ""))
+                            put("Asr", timings.optString("Asr", ""))
+                            put("Maghrib", timings.optString("Maghrib", ""))
+                            put("Isha", timings.optString("Isha", ""))
+                        }
+                        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("cached_aladhan_timings", cacheObj.toString())
+                            .apply()
+                        synced = true
+                    }
+                }
+                conn.disconnect()
+            } catch (_: Exception) {
+            }
+            Handler(Looper.getMainLooper()).post {
+                onComplete?.invoke(synced)
+            }
+        }.start()
     }
 
     /**
@@ -287,21 +550,29 @@ object PrayerTimesAndAdhanManager {
                         } catch (_: Exception) {
                         }
                         val saved = loadSettings(context)
-                        onResult(saved.latitude, saved.longitude, "${saved.locationName} (تم الضبط تلقائياً)", true)
+                        onResult(saved.latitude, saved.longitude, normalizeArabicCityDisplayName(saved.locationName), true)
                     }
                 }, 3500L)
             } else {
                 val saved = loadSettings(context)
-                onResult(saved.latitude, saved.longitude, saved.locationName, false)
+                onResult(saved.latitude, saved.longitude, normalizeArabicCityDisplayName(saved.locationName), false)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Auto location detection error", e)
             val saved = loadSettings(context)
-            onResult(saved.latitude, saved.longitude, saved.locationName, false)
+            onResult(saved.latitude, saved.longitude, normalizeArabicCityDisplayName(saved.locationName), false)
         }
     }
 
     private fun resolveCityName(context: Context, lat: Double, lon: Double): String {
+        // First check if coordinates are very close (< 18 km) to a known preset city (e.g. Al-Arish)
+        val nearestPreset = presetCities.minByOrNull { city ->
+            hypot(city.latitude - lat, city.longitude - lon)
+        }
+        if (nearestPreset != null && hypot(nearestPreset.latitude - lat, nearestPreset.longitude - lon) < 0.16) {
+            return nearestPreset.nameAr
+        }
+
         try {
             val geocoder = Geocoder(context, Locale("ar"))
             @Suppress("DEPRECATION")
@@ -309,25 +580,17 @@ object PrayerTimesAndAdhanManager {
             if (!addresses.isNullOrEmpty()) {
                 val addr = addresses[0]
                 val city = addr.locality ?: addr.subAdminArea ?: addr.adminArea ?: ""
+                val admin = addr.adminArea ?: ""
                 val country = addr.countryName ?: ""
-                if (city.isNotBlank() && country.isNotBlank()) {
-                    return "$city، $country"
-                } else if (city.isNotBlank()) {
-                    return city
-                } else if (country.isNotBlank()) {
-                    return country
+                if (city.isNotBlank() || admin.isNotBlank() || country.isNotBlank()) {
+                    return normalizeArabicCityDisplayName(city, admin, country)
                 }
             }
         } catch (_: Exception) {
         }
         // Fallback to nearest preset city if geocoder is unavailable offline
-        val nearest = presetCities.minByOrNull { city ->
-            val dLat = city.latitude - lat
-            val dLon = city.longitude - lon
-            dLat * dLat + dLon * dLon
-        }
-        if (nearest != null && hypot(nearest.latitude - lat, nearest.longitude - lon) < 2.5) {
-            return nearest.nameAr
+        if (nearestPreset != null && hypot(nearestPreset.latitude - lat, nearestPreset.longitude - lon) < 2.5) {
+            return nearestPreset.nameAr
         }
         return String.format(Locale.US, "موقع GPS (%.2f, %.2f)", lat, lon)
     }

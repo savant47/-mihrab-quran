@@ -122,12 +122,18 @@ import com.example.ui.components.BackupRestoreDialog
 import com.example.ui.components.DoveAndMessageIcon
 import com.example.ui.components.MihrabiLogo
 import com.example.ui.components.MorningEveningAdhkarBox
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.graphics.Color
 import com.example.ui.components.SpiritualStartupMessageDialog
+import com.example.ui.components.WAQF_LINE_1
+import com.example.ui.components.WAQF_LINE_2
+import com.example.ui.components.WaqfDedicationDialog
 import com.example.ui.components.shareSpiritualMessage
 import com.example.data.QuranDataHelper
 import com.example.data.model.KhatmaTrack
 import com.example.data.model.ReadingLog
 import com.example.data.model.User
+import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
@@ -190,6 +196,7 @@ fun MainDashboardScreen(
     var isMushafFullScreen by remember { mutableStateOf(false) }
     var showCreateTrackDialog by remember { mutableStateOf(false) }
     var showRenameTrackDialog by remember { mutableStateOf(false) }
+    var showWaqfDedicationDialog by remember { mutableStateOf(false) }
 
     BackHandler(enabled = selectedBottomTab == 1 && isMushafFullScreen) {
         isMushafFullScreen = false
@@ -198,89 +205,148 @@ fun MainDashboardScreen(
     Scaffold(
         topBar = {
             if (selectedBottomTab != 1) {
-                TopAppBar(
-                    title = {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 4.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        // Row 1: App Emblem & Title + Quick Actions (Spiritual Message + Backup)
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            MihrabiLogo(
-                                size = 36.dp,
-                                showIntegratedText = false,
-                                animatedGlow = false
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                MihrabiLogo(
+                                    size = 36.dp,
+                                    showIntegratedText = false,
+                                    animatedGlow = false
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "محرابي",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = GoldAccent,
+                                        fontSize = 18.sp
+                                    )
+                                    Text(
+                                        text = "وِردُكَ.. خلوتُكَ.. ومحرابُك",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Quick Startup Spiritual Message Button (🕊️✉️)
+                                IconButton(
+                                    onClick = {
+                                        val latest = spiritualMessages.firstOrNull()
+                                            ?: localStorage.recordNextStartupMessage()
+                                        activeStartupMessage = latest
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("top_spiritual_message_button")
+                                ) {
+                                    DoveAndMessageIcon(modifier = Modifier.size(22.dp))
+                                }
+
+                                // Backup & Restore Progress Button
+                                OutlinedButton(
+                                    onClick = { showBackupDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, GoldAccent),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = RoyalNavyDark,
+                                        contentColor = GoldAccent
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("top_backup_restore_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Backup,
+                                        contentDescription = "نسخ احتياطي واستعادة",
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "نسخ احتياطي",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Row 2: Full-Width Balanced 2-Line Waqf & Sadaqah Jariyah Banner (Clickable for Full Waqf Card)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF0A192F).copy(alpha = 0.9f),
+                            border = BorderStroke(0.8.dp, GoldBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showWaqfDedicationDialog = true }
+                                .testTag("waqf_dedication_banner")
+                        ) {
                             Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 4.dp)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "محرابي",
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = WAQF_LINE_1,
+                                    fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp,
+                                    color = GoldAccent,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                                 Text(
-                                    text = "إعداد آسر الشربيني | وقف لله تعالى - لا تنسونا من خالص الدعاء لأبي وأمي",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = GoldAccent,
-                                    fontSize = 9.sp,
-                                    lineHeight = 12.sp,
+                                    text = WAQF_LINE_2,
+                                    fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 2
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 14.sp,
+                                    color = Color(0xFFE6F1FF),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
-                    },
-                    actions = {
-                        // Quick Startup Spiritual Message Button (🕊️✉️)
-                        IconButton(
-                            onClick = {
-                                val latest = spiritualMessages.firstOrNull()
-                                    ?: localStorage.recordNextStartupMessage()
-                                activeStartupMessage = latest
-                            },
-                            modifier = Modifier.testTag("top_spiritual_message_button")
-                        ) {
-                            DoveAndMessageIcon(modifier = Modifier.size(22.dp))
-                        }
-
-                        // Backup & Restore Progress Button
-                        OutlinedButton(
-                            onClick = { showBackupDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, GoldAccent),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = RoyalNavyDark,
-                                contentColor = GoldAccent
-                            ),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .padding(end = 6.dp)
-                                .height(34.dp)
-                                .testTag("top_backup_restore_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Backup,
-                                contentDescription = "نسخ احتياطي واستعادة",
-                                tint = GoldAccent,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "نسخ احتياطي",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
+                    }
+                }
             }
         },
         bottomBar = {
@@ -1213,6 +1279,12 @@ fun MainDashboardScreen(
             onDismissClose = {
                 activeStartupMessage = null
             }
+        )
+    }
+
+    if (showWaqfDedicationDialog) {
+        WaqfDedicationDialog(
+            onDismiss = { showWaqfDedicationDialog = false }
         )
     }
 

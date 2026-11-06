@@ -606,6 +606,153 @@ private fun AdhanSettingsDialog(
                     }
                 }
 
+                // Live Global City Search Bar (Online + Offline)
+                var citySearchQuery by remember { mutableStateOf("") }
+                var citySearchResults by remember { mutableStateOf<List<CityPreset>>(emptyList()) }
+                var isSearchingCities by remember { mutableStateOf(false) }
+
+                OutlinedTextField(
+                    value = citySearchQuery,
+                    onValueChange = { q ->
+                        citySearchQuery = q
+                        if (q.trim().isNotEmpty()) {
+                            isSearchingCities = true
+                            PrayerTimesAndAdhanManager.searchCitiesWorldwide(context, q) { results ->
+                                citySearchResults = results
+                                isSearchingCities = false
+                            }
+                        } else {
+                            citySearchResults = emptyList()
+                            isSearchingCities = false
+                        }
+                    },
+                    label = { Text("ابحث عن أي مدينة في العالم (مثال: العريش، المنصورة، مكة...)") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = GoldAccent)
+                    },
+                    trailingIcon = {
+                        if (citySearchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                citySearchQuery = ""
+                                citySearchResults = emptyList()
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "مسح", tint = GoldAccent)
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("adhan_global_city_search_input")
+                )
+
+                if (isSearchingCities) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = GoldAccent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "جاري البحث عن المدن ومطابقة الإحداثيات الفلكية...",
+                            fontSize = 11.sp,
+                            color = GoldAccent
+                        )
+                    }
+                }
+
+                if (citySearchResults.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = RoyalNavyDark,
+                        border = BorderStroke(1.dp, GoldBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "نتائج البحث (اضغط لاختيار المدينة):",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = GoldAccent,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                            citySearchResults.take(8).forEach { foundCity ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (draft.locationName == foundCity.nameAr)
+                                        EmeraldGreen.copy(alpha = 0.25f)
+                                    else
+                                        Color(0xFF162C4E),
+                                    border = BorderStroke(
+                                        0.7.dp,
+                                        if (draft.locationName == foundCity.nameAr) EmeraldGreen else GoldBorder.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            draft = draft.copy(
+                                                locationName = foundCity.nameAr,
+                                                latitude = foundCity.latitude,
+                                                longitude = foundCity.longitude,
+                                                isAutoLocation = false
+                                            )
+                                            citySearchQuery = ""
+                                            citySearchResults = emptyList()
+                                            Toast.makeText(
+                                                context,
+                                                "تم اختيار: ${foundCity.nameAr}",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocationOn,
+                                                contentDescription = null,
+                                                tint = GoldAccent,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = foundCity.nameAr,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.5.sp,
+                                                color = Color.White
+                                            )
+                                        }
+                                        Text(
+                                            text = "اختيار ✓",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = GoldAccent
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Preset City Dropdown (for quick manual override if needed)
                 ExposedDropdownMenuBox(
                     expanded = cityDropdownExpanded,
@@ -615,7 +762,7 @@ private fun AdhanSettingsDialog(
                         value = draft.locationName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("المدينة الحالية (أو اختر مدينة يدوياً)") },
+                        label = { Text("المدينة المختارة حالياً (أو اختر من قائمة المحافظات والمدن)") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cityDropdownExpanded) },
                         modifier = Modifier
                             .menuAnchor()

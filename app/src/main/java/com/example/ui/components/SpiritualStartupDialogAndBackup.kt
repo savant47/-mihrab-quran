@@ -52,6 +52,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+const val WAQF_LINE_1 = "إعداد: آسر الشربيني • وقفٌ لله تعالى وصدقةٌ جارية عني وعن والديّ"
+const val WAQF_LINE_2 = "اللهم اغفر لأبي وارحمه، وأدم على أمي الصحة والعافية وطول العمر في طاعتك ورضاك"
+
 fun shareSpiritualMessage(context: Context, message: SpiritualMessageItem) {
     val shareBody = buildString {
         append("🕊️✉️ رسالة إيمانية من تطبيق محرابي\n")
@@ -60,7 +63,7 @@ fun shareSpiritualMessage(context: Context, message: SpiritualMessageItem) {
         append("${message.arabicText}\n\n")
         append("📚 المصدر: ${message.sourceReference}\n")
         append("━━━━━━━━━━━━━━━━━━\n")
-        append("تطبيق محرابي - إعداد آسر الشربيني | وقف لله تعالى")
+        append("$WAQF_LINE_1\n$WAQF_LINE_2")
     }
     val sendIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
@@ -70,7 +73,130 @@ fun shareSpiritualMessage(context: Context, message: SpiritualMessageItem) {
 }
 
 /**
- * Ornate historical Islamic manuscript-style dialog displayed on app startup
+ * Dialog displaying the dignified 2-line Waqf & Sadaqah Jariyah dedication for the parents.
+ */
+@Composable
+fun WaqfDedicationDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0A192F),
+                            Color(0xFF112240),
+                            Color(0xFF0A192F)
+                        )
+                    )
+                )
+                .border(1.8.dp, GoldAccent, RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color(0xFF162C4E),
+                    border = BorderStroke(1.dp, GoldAccent)
+                ) {
+                    Text(
+                        text = "🕌 وقفٌ لله تعالى وصدقةٌ جارية",
+                        color = GoldAccent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF162C4E))
+                        .border(1.dp, GoldBorder, RoundedCornerShape(16.dp))
+                        .padding(16.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = WAQF_LINE_1,
+                            color = GoldAccent,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.5.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 22.sp
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.fillMaxWidth(0.6f),
+                            color = GoldBorder
+                        )
+                        Text(
+                            text = WAQF_LINE_2,
+                            color = Color(0xFFF8FAF2),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 23.sp
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val shareText = "🕌 تطبيق محرابي\n$WAQF_LINE_1\n$WAQF_LINE_2"
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "مشاركة الدعاء"))
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldGreen,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("مشاركة الدعاء", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        border = BorderStroke(1.dp, GoldAccent),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(0.8f)
+                    ) {
+                        Text("إغلاق", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Ornate Islamic dialog displayed on app startup in the unified Royal Navy & Deep Emerald theme
  * (and re-openable anytime from the "السجل" tab).
  */
 @Composable
@@ -80,9 +206,9 @@ fun SpiritualStartupMessageDialog(
     onShare: () -> Unit,
     onDismissClose: () -> Unit
 ) {
-    val parchmentLight = Color(0xFFFDF8EE)
-    val parchmentMid = Color(0xFFF5E8CE)
-    val deepInk = Color(0xFF0B1426)
+    val navyCardTop = Color(0xFF112240)
+    val navyCardBottom = Color(0xFF162C4E)
+    val luminousText = Color(0xFFF8FAF2)
 
     Dialog(
         onDismissRequest = onDismissClose,
@@ -95,9 +221,9 @@ fun SpiritualStartupMessageDialog(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            RoyalNavyDark,
-                            Color(0xFF132238),
-                            RoyalNavyDark
+                            Color(0xFF0A192F),
+                            Color(0xFF112240),
+                            Color(0xFF0A192F)
                         )
                     )
                 )
@@ -167,7 +293,7 @@ fun SpiritualStartupMessageDialog(
                     // 1. Small ornate top header: "رسالة من مطور التطبيق" with Dove & Envelope crest
                     Surface(
                         shape = RoundedCornerShape(50),
-                        color = Color(0xFF1A2B4C),
+                        color = Color(0xFF162C4E),
                         border = BorderStroke(1.dp, GoldAccent)
                     ) {
                         Row(
@@ -197,8 +323,8 @@ fun SpiritualStartupMessageDialog(
                     // 2. Category Pill (Quranic Dua / Prophetic Hadith / Qudsi Hadith)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = EmeraldGreen.copy(alpha = 0.25f),
-                        border = BorderStroke(0.8.dp, EmeraldGreen)
+                        color = EmeraldGreen.copy(alpha = 0.35f),
+                        border = BorderStroke(0.8.dp, GoldAccent)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -213,7 +339,7 @@ fun SpiritualStartupMessageDialog(
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = message.categoryTitle,
-                                color = Color(0xFFFDF8EE),
+                                color = Color(0xFFF8FAF2),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -222,14 +348,14 @@ fun SpiritualStartupMessageDialog(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // 3. Historical Illuminated Parchment Scroll Card
+                    // 3. Unified Royal Navy & Deep Emerald Illuminated Card
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
                             .background(
                                 Brush.verticalGradient(
-                                    colors = listOf(parchmentLight, parchmentMid, parchmentLight)
+                                    colors = listOf(navyCardTop, navyCardBottom, navyCardTop)
                                 )
                             )
                             .border(1.5.dp, GoldAccent, RoundedCornerShape(18.dp))
@@ -239,10 +365,10 @@ fun SpiritualStartupMessageDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Top decorative Bismillah / star divider
+                            // Top decorative star divider
                             Text(
                                 text = "۞ ❁ ۞",
-                                color = Color(0xFF9C7832),
+                                color = GoldAccent,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
@@ -252,9 +378,9 @@ fun SpiritualStartupMessageDialog(
 
                             Text(
                                 text = message.arabicText,
-                                color = deepInk,
-                                fontSize = 18.5.sp,
-                                lineHeight = 32.sp,
+                                color = luminousText,
+                                fontSize = 19.sp,
+                                lineHeight = 33.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Serif,
                                 textAlign = TextAlign.Center,
@@ -273,7 +399,7 @@ fun SpiritualStartupMessageDialog(
 
                             Text(
                                 text = message.sourceReference,
-                                color = EmeraldGreen,
+                                color = GoldAccent,
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 textAlign = TextAlign.Center
@@ -285,7 +411,7 @@ fun SpiritualStartupMessageDialog(
 
                     Text(
                         text = "تُحفظ هذه الرسالة تلقائياً في تبويب «السجل» للرجوع إليها في أي وقت",
-                        color = Color(0xFFFDF8EE).copy(alpha = 0.72f),
+                        color = Color(0xFFF8FAF2).copy(alpha = 0.72f),
                         fontSize = 10.5.sp,
                         textAlign = TextAlign.Center
                     )
