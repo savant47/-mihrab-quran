@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.QuranTextMatcher
+import com.example.data.local.LocalKhatmaStorage
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
@@ -221,10 +222,11 @@ fun HisnAlMuslimCompleteDialog(
         }
     }
 
-    val unifiedNavyBg = Color(0xFF0A192F)
-    val unifiedNavyCard = Color(0xFF112240)
-    val unifiedGoldTitle = GoldAccent
+    val unifiedLightBg = Color(0xFFFDF8EC)
+    val unifiedLightCard = Color(0xFFF5EFE0)
+    val unifiedGoldTitle = EmeraldGreen
     val unifiedGoldDivider = GoldBorder
+    val darkInkText = Color(0xFF1A110B)
 
     Dialog(
         onDismissRequest = {
@@ -241,7 +243,7 @@ fun HisnAlMuslimCompleteDialog(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .testTag("hisn_al_muslim_complete_dialog"),
-            color = unifiedNavyBg
+            color = unifiedLightBg
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // 1. Top Ornate Header Bar
@@ -271,7 +273,7 @@ fun HisnAlMuslimCompleteDialog(
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                             contentDescription = "العودة للفهرس",
-                                            tint = GoldAccent
+                                            tint = EmeraldGreen
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -280,14 +282,14 @@ fun HisnAlMuslimCompleteDialog(
                                         modifier = Modifier
                                             .size(36.dp)
                                             .clip(CircleShape)
-                                            .background(GoldAccent.copy(alpha = 0.18f))
+                                            .background(GoldAccent.copy(alpha = 0.15f))
                                             .border(1.dp, GoldAccent, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.MenuBook,
                                             contentDescription = null,
-                                            tint = GoldAccent,
+                                            tint = EmeraldGreen,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -300,7 +302,7 @@ fun HisnAlMuslimCompleteDialog(
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 20.sp,
-                                        color = GoldAccent,
+                                        color = EmeraldGreen,
                                         maxLines = 1
                                     )
                                     Text(
@@ -309,7 +311,7 @@ fun HisnAlMuslimCompleteDialog(
                                         else
                                             "جميع أبواب وأدعية حصن المسلم (${allChapters.size} باباً) كاملة بدون إنترنت",
                                         fontSize = 11.sp,
-                                        color = Color(0xFFF8FAF2).copy(alpha = 0.85f)
+                                        color = darkInkText.copy(alpha = 0.78f)
                                     )
                                 }
                             }
@@ -326,7 +328,7 @@ fun HisnAlMuslimCompleteDialog(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "إغلاق",
-                                    tint = GoldAccent
+                                    tint = EmeraldGreen
                                 )
                             }
                         }
@@ -341,14 +343,14 @@ fun HisnAlMuslimCompleteDialog(
                                     Text(
                                         text = "ابحث عن أي دعاء أو باب (مثال: الاستخارة، السفر، الكرب، النوم...)",
                                         fontSize = 12.sp,
-                                        color = Color(0xFFF8FAF2).copy(alpha = 0.65f)
+                                        color = darkInkText.copy(alpha = 0.6f)
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = null,
-                                        tint = GoldAccent
+                                        tint = EmeraldGreen
                                     )
                                 },
                                 trailingIcon = {
@@ -365,11 +367,11 @@ fun HisnAlMuslimCompleteDialog(
                                 singleLine = true,
                                 shape = RoundedCornerShape(14.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFF8FAF2),
-                                    unfocusedTextColor = Color(0xFFF8FAF2),
-                                    focusedContainerColor = Color(0xFF162C4E),
-                                    unfocusedContainerColor = Color(0xFF162C4E),
-                                    focusedBorderColor = GoldAccent,
+                                    focusedTextColor = darkInkText,
+                                    unfocusedTextColor = darkInkText,
+                                    focusedContainerColor = Color(0xFFFDF8EC),
+                                    unfocusedContainerColor = Color(0xFFFDF8EC),
+                                    focusedBorderColor = EmeraldGreen,
                                     unfocusedBorderColor = GoldBorder
                                 ),
                                 modifier = Modifier
@@ -390,10 +392,10 @@ fun HisnAlMuslimCompleteDialog(
                                     val isSelected = selectedGroup == group
                                     Surface(
                                         shape = RoundedCornerShape(50),
-                                        color = if (isSelected) GoldAccent else Color(0xFF162C4E),
+                                        color = if (isSelected) EmeraldGreen else Color(0xFFFDF8EC),
                                         border = BorderStroke(
                                             1.dp,
-                                            if (isSelected) GoldAccent else GoldBorder
+                                            if (isSelected) EmeraldGreen else GoldBorder
                                         ),
                                         modifier = Modifier.clickable {
                                             selectedGroup = group
@@ -401,7 +403,7 @@ fun HisnAlMuslimCompleteDialog(
                                     ) {
                                         Text(
                                             text = group.labelAr,
-                                            color = if (isSelected) Color(0xFF0A192F) else Color(0xFFF8FAF2),
+                                            color = if (isSelected) Color.White else darkInkText,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.5.sp,
                                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -419,7 +421,7 @@ fun HisnAlMuslimCompleteDialog(
                     HisnChapterDetailView(
                         chapter = selectedChapter,
                         prefs = prefs,
-                        parchmentCard = unifiedNavyCard,
+                        parchmentCard = unifiedLightCard,
                         warmBrownTitle = unifiedGoldTitle,
                         onBackToIndex = { activeChapter = null },
                         onNextChapter = {
@@ -442,7 +444,6 @@ fun HisnAlMuslimCompleteDialog(
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Classic "الفهرس" Header in unified Royal Navy & Gold
                         item {
                             Row(
                                 modifier = Modifier
@@ -472,18 +473,18 @@ fun HisnAlMuslimCompleteDialog(
                                         text = "نتائج الأدعية المطابقة: ${directSearchDuaMatches.size}",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF4FD1C5)
+                                        color = GoldAccent
                                     )
                                 }
                             }
                             HorizontalDivider(thickness = 1.2.dp, color = unifiedGoldDivider)
                         }
 
-                        // Index List of Chapters in Unified Royal Navy Card Theme
+                        // Index List of Chapters in Unified Light Mushaf Card Theme
                         items(filteredChapters, key = { "ch_${it.id}" }) { chapter ->
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = unifiedNavyCard,
+                                color = unifiedLightCard,
                                 border = BorderStroke(1.dp, unifiedGoldDivider),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -507,12 +508,12 @@ fun HisnAlMuslimCompleteDialog(
                                     ) {
                                         Surface(
                                             shape = CircleShape,
-                                            color = EmeraldGreen.copy(alpha = 0.35f),
-                                            border = BorderStroke(0.8.dp, GoldAccent)
+                                            color = EmeraldGreen.copy(alpha = 0.12f),
+                                            border = BorderStroke(0.8.dp, EmeraldGreen)
                                         ) {
                                             Text(
                                                 text = "${chapter.id}",
-                                                color = GoldAccent,
+                                                color = EmeraldGreen,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp,
                                                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
@@ -525,7 +526,7 @@ fun HisnAlMuslimCompleteDialog(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 20.sp,
                                             lineHeight = 28.sp,
-                                            color = Color(0xFFF8FAF2),
+                                            color = darkInkText,
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
@@ -537,7 +538,7 @@ fun HisnAlMuslimCompleteDialog(
                                     ) {
                                         Text(
                                             text = "${chapter.duas.size} ذكر",
-                                            color = GoldAccent,
+                                            color = Color.White,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -547,7 +548,6 @@ fun HisnAlMuslimCompleteDialog(
                             }
                         }
 
-                        // If searching, also display direct matching Dua cards below the matching chapters
                         if (normalizedQuery.length >= 2 && directSearchDuaMatches.isNotEmpty()) {
                             item {
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -556,13 +556,13 @@ fun HisnAlMuslimCompleteDialog(
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 19.sp,
-                                    color = GoldAccent
+                                    color = EmeraldGreen
                                 )
                             }
                             items(directSearchDuaMatches, key = { "search_${it.uniqueKey}" }) { dua ->
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
-                                    color = unifiedNavyCard,
+                                    color = unifiedLightCard,
                                     border = BorderStroke(1.2.dp, GoldAccent),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -586,7 +586,7 @@ fun HisnAlMuslimCompleteDialog(
                                                 text = "باب: ${dua.categoryTitle}",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.sp,
-                                                color = GoldAccent,
+                                                color = EmeraldGreen,
                                                 modifier = Modifier.weight(1f)
                                             )
                                             Surface(
@@ -609,7 +609,7 @@ fun HisnAlMuslimCompleteDialog(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 19.sp,
                                             lineHeight = 32.sp,
-                                            color = Color(0xFFF8FAF2)
+                                            color = darkInkText
                                         )
                                     }
                                 }
@@ -626,7 +626,7 @@ fun HisnAlMuslimCompleteDialog(
                                 ) {
                                     Text(
                                         text = "لا توجد نتائج مطابقة لـ «$searchQuery». جرب البحث بكلمة أخرى مثل: النوم، السفر، الاستخارة، المريض.",
-                                        color = GoldAccent,
+                                        color = EmeraldGreen,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         textAlign = TextAlign.Center
@@ -653,6 +653,7 @@ private fun HisnChapterDetailView(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
 
     val counts = remember(chapter.id) {
         mutableStateMapOf<String, Int>().apply {
@@ -665,7 +666,7 @@ private fun HisnChapterDetailView(
     Column(modifier = Modifier.fillMaxSize()) {
         // Chapter Navigation Subbar (Prev / Index / Next)
         Surface(
-            color = Color(0xFF162C4E),
+            color = Color(0xFFF3E9D2),
             border = BorderStroke(0.8.dp, GoldBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -682,7 +683,7 @@ private fun HisnChapterDetailView(
                     shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(1.dp, GoldBorder),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
                 ) {
                     Text("الباب السابق", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
@@ -691,13 +692,13 @@ private fun HisnChapterDetailView(
                     Icon(
                         imageVector = Icons.Default.FormatListBulleted,
                         contentDescription = null,
-                        tint = GoldAccent,
+                        tint = EmeraldGreen,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "الفهرس (١٣٢)",
-                        color = GoldAccent,
+                        color = EmeraldGreen,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 12.5.sp
                     )
@@ -709,7 +710,7 @@ private fun HisnChapterDetailView(
                     shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(1.dp, GoldBorder),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
                 ) {
                     Text("الباب التالي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
@@ -735,17 +736,18 @@ private fun HisnChapterDetailView(
                                 val next = currentCount + 1
                                 counts[dua.uniqueKey] = next
                                 prefs.edit().putInt(dua.uniqueKey, next).apply()
+                                localStorage.incrementCumulativeAdhkarTasbeeh(1)
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                         }
                         .border(
                             width = if (isCompleted) 1.8.dp else 1.dp,
-                            color = if (isCompleted) GoldAccent else GoldBorder,
+                            color = if (isCompleted) EmeraldGreen else GoldBorder,
                             shape = RoundedCornerShape(18.dp)
                         ),
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isCompleted) EmeraldGreen.copy(alpha = 0.28f) else parchmentCard
+                        containerColor = if (isCompleted) EmeraldGreen.copy(alpha = 0.10f) else parchmentCard
                     )
                 ) {
                     Column(
@@ -764,7 +766,7 @@ private fun HisnChapterDetailView(
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = null,
-                                        tint = GoldAccent,
+                                        tint = EmeraldGreen,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -773,7 +775,7 @@ private fun HisnChapterDetailView(
                                     text = "الذكر (${dua.idInChapter})",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.5.sp,
-                                    color = GoldAccent
+                                    color = EmeraldGreen
                                 )
                             }
 
@@ -789,7 +791,7 @@ private fun HisnChapterDetailView(
                                         in 3..10 -> "${dua.targetCount} مرات"
                                         else -> "${dua.targetCount} مرة"
                                     },
-                                    color = if (isCompleted) Color(0xFF0A192F) else Color.White,
+                                    color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -806,7 +808,7 @@ private fun HisnChapterDetailView(
                             fontWeight = FontWeight.Bold,
                             fontSize = 21.sp,
                             lineHeight = 36.sp,
-                            color = Color(0xFFF8FAF2),
+                            color = Color(0xFF1A110B),
                             textAlign = TextAlign.Right,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -825,12 +827,13 @@ private fun HisnChapterDetailView(
                                         val next = currentCount + 1
                                         counts[dua.uniqueKey] = next
                                         prefs.edit().putInt(dua.uniqueKey, next).apply()
+                                        localStorage.incrementCumulativeAdhkarTasbeeh(1)
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (isCompleted) GoldAccent else EmeraldGreen,
-                                    contentColor = if (isCompleted) Color(0xFF0A192F) else Color.White
+                                    contentColor = Color.White
                                 ),
                                 border = BorderStroke(1.dp, GoldAccent),
                                 shape = RoundedCornerShape(12.dp),

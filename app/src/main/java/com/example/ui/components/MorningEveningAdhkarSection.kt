@@ -77,11 +77,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.audio.QuranAudioPlayerManager
+import com.example.data.local.LocalKhatmaStorage
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
 import com.example.ui.theme.RoyalNavyDark
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -220,15 +224,15 @@ private fun AdhkarActiveAudioPlayerBar(
 ) {
     val isMorningTrack = audioState.activeTrack == "morning"
     val trackTitle = if (isMorningTrack) {
-        "🎧 استماع أذكار الصباح مختصرة (ترديد هادئ)"
+        "🎧 استماع أذكار الصباح مختصرة"
     } else {
-        "🎧 استماع أذكار المساء مختصرة (ترديد هادئ)"
+        "🎧 استماع أذكار المساء مختصرة"
     }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = RoyalNavyDark,
+        color = Color(0xFFF3E9D2),
         border = BorderStroke(1.2.dp, GoldAccent)
     ) {
         Column(
@@ -246,14 +250,14 @@ private fun AdhkarActiveAudioPlayerBar(
                     fontFamily = AmiriFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = GoldAccent,
+                    color = EmeraldGreen,
                     modifier = Modifier.weight(1f)
                 )
 
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (audioState.isLooping) EmeraldGreen else Color.White.copy(alpha = 0.1f),
-                    border = BorderStroke(1.dp, if (audioState.isLooping) GoldAccent else Color.White.copy(alpha = 0.25f)),
+                    color = if (audioState.isLooping) EmeraldGreen else Color(0xFFEBE1C9),
+                    border = BorderStroke(1.dp, if (audioState.isLooping) EmeraldGreen else GoldBorder),
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .clickable { AdhkarAudioPlayerManager.toggleLoop() }
@@ -288,7 +292,7 @@ private fun AdhkarActiveAudioPlayerBar(
                 colors = SliderDefaults.colors(
                     thumbColor = GoldAccent,
                     activeTrackColor = EmeraldGreen,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                    inactiveTrackColor = GoldBorder.copy(alpha = 0.45f)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -303,7 +307,7 @@ private fun AdhkarActiveAudioPlayerBar(
                 Text(
                     text = formatAudioTime(audioState.currentPositionMs),
                     fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = Color(0xFF1A110B).copy(alpha = 0.85f),
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -331,8 +335,8 @@ private fun AdhkarActiveAudioPlayerBar(
                         },
                         shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = GoldAccent,
-                            contentColor = RoyalNavyDark
+                            containerColor = EmeraldGreen,
+                            contentColor = Color.White
                         ),
                         contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.size(40.dp)
@@ -363,7 +367,7 @@ private fun AdhkarActiveAudioPlayerBar(
                         Icon(
                             imageVector = Icons.Default.Stop,
                             contentDescription = "إيقاف",
-                            tint = Color(0xFFFF8A80),
+                            tint = Color(0xFFB71C1C),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -372,12 +376,34 @@ private fun AdhkarActiveAudioPlayerBar(
                 Text(
                     text = formatAudioTime(audioState.durationMs),
                     fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = Color(0xFF1A110B).copy(alpha = 0.85f),
                     fontWeight = FontWeight.SemiBold
                 )
             }
         }
     }
+}
+
+private const val KEY_LAST_DAILY_ADHKAR_RESET_DATE = "last_daily_reset_date_yyyy_mm_dd"
+
+/**
+ * Automatically resets Morning & Evening Adhkar daily progress to 0 whenever the calendar date
+ * changes at 12:00 AM midnight.
+ */
+fun ensureDailyAdhkarResetIfNewDay(prefs: android.content.SharedPreferences): Boolean {
+    val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val lastResetDate = prefs.getString(KEY_LAST_DAILY_ADHKAR_RESET_DATE, null)
+    if (lastResetDate != todayKey) {
+        val editor = prefs.edit()
+        if (lastResetDate != null) {
+            AuthenticAdhkarData.morningAdhkar.forEach { editor.putInt(it.id, 0) }
+            AuthenticAdhkarData.eveningAdhkar.forEach { editor.putInt(it.id, 0) }
+        }
+        editor.putString(KEY_LAST_DAILY_ADHKAR_RESET_DATE, todayKey)
+        editor.apply()
+        return lastResetDate != null
+    }
+    return false
 }
 
 data class HisnDhikrItem(
@@ -625,7 +651,7 @@ fun MorningEveningAdhkarBox() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
     val backupVersion by remember {
-        com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
+        LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
     }.collectAsState()
 
     val audioState by AdhkarAudioPlayerManager.state.collectAsState()
@@ -642,12 +668,27 @@ fun MorningEveningAdhkarBox() {
     var initialHisnGroupKey by remember { mutableStateOf(HisnSectionGroup.ALL.key) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
+    // Automatic Daily Reset at 12:00 AM midnight (checks on launch and every 20 seconds while open)
+    LaunchedEffect(Unit) {
+        if (ensureDailyAdhkarResetIfNewDay(prefs)) {
+            refreshTrigger++
+        }
+        while (true) {
+            delay(20_000L)
+            if (ensureDailyAdhkarResetIfNewDay(prefs)) {
+                refreshTrigger++
+            }
+        }
+    }
+
     val morningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
+        ensureDailyAdhkarResetIfNewDay(prefs)
         AuthenticAdhkarData.morningAdhkar.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
     }
     val eveningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
+        ensureDailyAdhkarResetIfNewDay(prefs)
         AuthenticAdhkarData.eveningAdhkar.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
@@ -690,15 +731,15 @@ fun MorningEveningAdhkarBox() {
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "حصن المسلم (الصباح والمساء والأدعية الكاملة)",
+                        text = "أذكار الصباح والمساء وحصن المسلم",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = GoldAccent
+                        color = EmeraldGreen
                     )
                     Text(
-                        text = "قراءة واستماع هادئ لأذكار الصباح والمساء + فهرس حصن المسلم كاملاً (١٣٢ باباً أوفلاين)",
+                        text = "تصفير تلقائي يومياً 12:00 ص • قراءة واستماع هادئ وفهرس حصن المسلم",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                         fontSize = 11.sp
                     )
                 }
@@ -710,7 +751,7 @@ fun MorningEveningAdhkarBox() {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Column 1: أذكار الصباح + زر استماع أذكار الصباح مختصرة + منبه أذكار الصباح
+                // Column 1: أذكار الصباح + استماع الصباح + منبه الصباح
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -726,9 +767,9 @@ fun MorningEveningAdhkarBox() {
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = RoyalNavyDark,
-                            contentColor = GoldAccent
+                            contentColor = Color(0xFF1A110B)
                         ),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -738,52 +779,53 @@ fun MorningEveningAdhkarBox() {
                                     tint = GoldAccent,
                                     modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "أذكار الصباح",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = GoldAccent
+                                    fontSize = 14.5.sp,
+                                    color = EmeraldGreen,
+                                    maxLines = 1
                                 )
                             }
-                            Spacer(modifier = Modifier.height(3.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "تم إنجاز $morningCompleted / ${AuthenticAdhkarData.morningAdhkar.size}",
+                                text = "إنجاز $morningCompleted / ${AuthenticAdhkarData.morningAdhkar.size}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.85f)
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF1A110B).copy(alpha = 0.8f)
                             )
                         }
                     }
 
-                    // Play Morning Adhkar Audio Button right below Morning Adhkar Box
+                    // Play Morning Adhkar Audio Button
                     Button(
                         onClick = { AdhkarAudioPlayerManager.togglePlay(context, "morning") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 46.dp)
+                            .defaultMinSize(minHeight = 42.dp)
                             .testTag("play_morning_adhkar_audio_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isMorningAudioPlaying) GoldAccent else RoyalNavyDark.copy(alpha = 0.92f),
-                            contentColor = if (isMorningAudioPlaying) RoyalNavyDark else GoldAccent
+                            containerColor = if (isMorningAudioPlaying) GoldAccent else Color(0xFFF3E9D2),
+                            contentColor = if (isMorningAudioPlaying) Color.White else EmeraldGreen
                         ),
                         border = BorderStroke(1.dp, GoldAccent),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Icon(
                             imageVector = if (isMorningAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "استماع أذكار الصباح مختصرة",
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = "استماع أذكار الصباح",
+                            modifier = Modifier.size(17.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (isMorningAudioPlaying) "إيقاف مؤقت للصباح" else "استماع أذكار الصباح مختصرة",
+                            text = if (isMorningAudioPlaying) "إيقاف الصباح" else "استماع الصباح",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 15.sp
+                            fontSize = 12.sp,
+                            maxLines = 1
                         )
                     }
 
@@ -797,7 +839,7 @@ fun MorningEveningAdhkarBox() {
                     )
                 }
 
-                // Column 2: أذكار المساء + زر استماع أذكار المساء مختصرة + منبه أذكار المساء
+                // Column 2: أذكار المساء + استماع المساء + منبه المساء
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -815,7 +857,7 @@ fun MorningEveningAdhkarBox() {
                             containerColor = EmeraldGreen,
                             contentColor = Color.White
                         ),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -825,52 +867,52 @@ fun MorningEveningAdhkarBox() {
                                     tint = Color.White,
                                     modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "أذكار المساء",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = Color.White
+                                    fontSize = 14.5.sp,
+                                    color = Color.White,
+                                    maxLines = 1
                                 )
                             }
-                            Spacer(modifier = Modifier.height(3.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "تم إنجاز $eveningCompleted / ${AuthenticAdhkarData.eveningAdhkar.size}",
+                                text = "إنجاز $eveningCompleted / ${AuthenticAdhkarData.eveningAdhkar.size}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.9f)
+                                color = Color.White.copy(alpha = 0.92f)
                             )
                         }
                     }
 
-                    // Play Evening Adhkar Audio Button right below Evening Adhkar Box
+                    // Play Evening Adhkar Audio Button
                     Button(
                         onClick = { AdhkarAudioPlayerManager.togglePlay(context, "evening") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 46.dp)
+                            .defaultMinSize(minHeight = 42.dp)
                             .testTag("play_evening_adhkar_audio_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isEveningAudioPlaying) GoldAccent else EmeraldGreen.copy(alpha = 0.9f),
-                            contentColor = if (isEveningAudioPlaying) RoyalNavyDark else Color.White
+                            contentColor = Color.White
                         ),
                         border = BorderStroke(1.dp, if (isEveningAudioPlaying) GoldAccent else EmeraldGreen),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         Icon(
                             imageVector = if (isEveningAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "استماع أذكار المساء مختصرة",
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = "استماع أذكار المساء",
+                            modifier = Modifier.size(17.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (isEveningAudioPlaying) "إيقاف مؤقت للمساء" else "استماع أذكار المساء مختصرة",
+                            text = if (isEveningAudioPlaying) "إيقاف المساء" else "استماع المساء",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 15.sp
+                            fontSize = 12.sp,
+                            maxLines = 1
                         )
                     }
 
@@ -897,13 +939,13 @@ fun MorningEveningAdhkarBox() {
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            androidx.compose.material3.HorizontalDivider(color = GoldBorder.copy(alpha = 0.4f))
+            androidx.compose.material3.HorizontalDivider(color = GoldBorder.copy(alpha = 0.45f))
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search) — Unified Royal Navy & Emerald Theme
+            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search) — Unified Light Mushaf Theme
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF162C4E),
+                color = Color(0xFFF3E9D2),
                 border = BorderStroke(1.2.dp, GoldBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -920,16 +962,16 @@ fun MorningEveningAdhkarBox() {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "📖 أدعية وأذكار حصن المسلم كاملة (١٣٢ باباً)",
+                                text = "📖 حصن المسلم الكامل (١٣٢ باباً)",
                                 fontFamily = AmiriFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 17.sp,
-                                color = GoldAccent
+                                color = EmeraldGreen
                             )
                             Text(
-                                text = "جميع أبواب حصن المسلم مقسمة ومرتبة أوفلاين بالكامل مع البحث الفوري",
+                                text = "جميع الأبواب والأدعية أوفلاين مع البحث الفوري",
                                 fontSize = 11.sp,
-                                color = Color(0xFFF8FAF2).copy(alpha = 0.85f)
+                                color = Color(0xFF1A110B).copy(alpha = 0.78f)
                             )
                         }
                     }
@@ -944,7 +986,7 @@ fun MorningEveningAdhkarBox() {
                         HisnSectionGroup.values().forEach { group ->
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = RoyalNavyDark,
+                                color = Color(0xFFFDF8EC),
                                 border = BorderStroke(1.dp, GoldBorder),
                                 modifier = Modifier.clickable {
                                     initialHisnGroupKey = group.key
@@ -953,7 +995,7 @@ fun MorningEveningAdhkarBox() {
                             ) {
                                 Text(
                                     text = group.labelAr,
-                                    color = GoldAccent,
+                                    color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -969,7 +1011,7 @@ fun MorningEveningAdhkarBox() {
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(46.dp)
+                            .height(44.dp)
                             .testTag("hisn_al_muslim_complete_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -979,10 +1021,11 @@ fun MorningEveningAdhkarBox() {
                         border = BorderStroke(1.dp, GoldAccent)
                     ) {
                         Text(
-                            text = "فتح فهرس حصن المسلم الكامل والبحث في الأدعية (١٣٢ باباً)",
+                            text = "فتح فهرس حصن المسلم والبحث",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
-                            color = Color.White
+                            fontSize = 13.sp,
+                            color = Color.White,
+                            maxLines = 1
                         )
                     }
                 }
@@ -1007,7 +1050,7 @@ fun MorningEveningAdhkarBox() {
             alarmTargetId = if (isMorning) "adhkar_morning" else "adhkar_evening",
             defaultAlarmHour = if (isMorning) 6 else 17,
             title = if (isMorning) "أذكار الصباح المباركة" else "أذكار المساء المباركة",
-            subtitle = if (isMorning) "حفظ وبركة وتحصين ليومك من حصن المسلم" else "سكينة وطمأنينة وحفظ لليلتك من حصن المسلم",
+            subtitle = if (isMorning) "حفظ وبركة وتحصين ليومك • تصفير تلقائي 12:00 ص" else "سكينة وطمأنينة وحفظ لليلتك • تصفير تلقائي 12:00 ص",
             items = if (isMorning) AuthenticAdhkarData.morningAdhkar else AuthenticAdhkarData.eveningAdhkar,
             onDismiss = {
                 refreshTrigger++
@@ -1030,10 +1073,12 @@ private fun AdhkarReaderDialog(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
+    val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val audioState by AdhkarAudioPlayerManager.state.collectAsState()
     val isThisTrackPlaying = audioState.activeTrack == trackType && audioState.isPlaying
 
     val counts = remember(items) {
+        ensureDailyAdhkarResetIfNewDay(prefs)
         mutableStateMapOf<String, Int>().apply {
             items.forEach { item ->
                 this[item.id] = prefs.getInt(item.id, 0)
@@ -1076,12 +1121,12 @@ private fun AdhkarReaderDialog(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    color = GoldAccent
+                                    color = EmeraldGreen
                                 )
                                 Text(
                                     text = subtitle,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.8f),
+                                    color = Color(0xFF1A110B).copy(alpha = 0.78f),
                                     fontSize = 11.sp
                                 )
                             }
@@ -1107,7 +1152,7 @@ private fun AdhkarReaderDialog(
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     },
                                     shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, GoldAccent.copy(alpha = 0.6f)),
+                                    border = BorderStroke(1.dp, GoldAccent),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
                                 ) {
@@ -1126,7 +1171,7 @@ private fun AdhkarReaderDialog(
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "إغلاق",
-                                        tint = GoldAccent
+                                        tint = EmeraldGreen
                                     )
                                 }
                             }
@@ -1143,7 +1188,7 @@ private fun AdhkarReaderDialog(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isThisTrackPlaying) GoldAccent else EmeraldGreen,
-                                contentColor = if (isThisTrackPlaying) RoyalNavyDark else Color.White
+                                contentColor = Color.White
                             ),
                             border = BorderStroke(1.dp, GoldAccent)
                         ) {
@@ -1155,9 +1200,9 @@ private fun AdhkarReaderDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (trackType == "morning") {
-                                    if (isThisTrackPlaying) "إيقاف مؤقت (استماع أذكار الصباح مختصرة)" else "▶ استماع أذكار الصباح مختصرة بهدوء"
+                                    if (isThisTrackPlaying) "إيقاف مؤقت (أذكار الصباح)" else "▶ استماع أذكار الصباح مختصرة"
                                 } else {
-                                    if (isThisTrackPlaying) "إيقاف مؤقت (استماع أذكار المساء مختصرة)" else "▶ استماع أذكار المساء مختصرة بهدوء"
+                                    if (isThisTrackPlaying) "إيقاف مؤقت (أذكار المساء)" else "▶ استماع أذكار المساء مختصرة"
                                 },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.5.sp
@@ -1182,13 +1227,13 @@ private fun AdhkarReaderDialog(
                             Text(
                                 text = "الإنجاز: $completedItemsCount من ${items.size} ذكر",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = GoldAccent,
+                                color = EmeraldGreen,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "${(progress * 100).toInt()}%",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = EmeraldGreen,
+                                color = GoldAccent,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1200,7 +1245,7 @@ private fun AdhkarReaderDialog(
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(4.dp)),
                             color = EmeraldGreen,
-                            trackColor = Color.White.copy(alpha = 0.15f)
+                            trackColor = GoldBorder.copy(alpha = 0.35f)
                         )
                     }
                 }
@@ -1225,6 +1270,7 @@ private fun AdhkarReaderDialog(
                                         val next = currentCount + 1
                                         counts[item.id] = next
                                         prefs.edit().putInt(item.id, next).apply()
+                                        localStorage.incrementCumulativeAdhkarTasbeeh(1)
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     }
                                 }
@@ -1236,7 +1282,7 @@ private fun AdhkarReaderDialog(
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isDone)
-                                    EmeraldGreen.copy(alpha = 0.08f)
+                                    EmeraldGreen.copy(alpha = 0.10f)
                                 else
                                     MaterialTheme.colorScheme.surface
                             )
@@ -1280,7 +1326,7 @@ private fun AdhkarReaderDialog(
                                         Text(
                                             text = if (item.targetCount == 1) "مرة واحدة" else "${item.targetCount} مرات",
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            color = if (isDone) Color.White else GoldAccent,
+                                            color = if (isDone) Color.White else EmeraldGreen,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -1325,13 +1371,15 @@ private fun AdhkarReaderDialog(
                                                 val next = currentCount + 1
                                                 counts[item.id] = next
                                                 prefs.edit().putInt(item.id, next).apply()
+                                                localStorage.incrementCumulativeAdhkarTasbeeh(1)
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = if (isDone) EmeraldGreen else RoyalNavyDark,
-                                            contentColor = if (isDone) Color.White else GoldAccent
+                                            contentColor = if (isDone) Color.White else EmeraldGreen
                                         ),
+                                        border = BorderStroke(1.dp, if (isDone) EmeraldGreen else GoldBorder),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {

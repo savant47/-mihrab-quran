@@ -154,6 +154,8 @@ fun MainDashboardScreen(
     onDismissPostLogReflectionDialog: () -> Unit = {},
     onSelectTrack: (String) -> Unit,
     onCreateTrack: (String) -> Unit,
+    onCreateFixedSurahTrack: (trackName: String, surahName: String, startPage: Int) -> Unit = { _, _, _ -> },
+    onDeleteTrack: (String) -> Unit = {},
     onRenameTrack: (String, String) -> Unit,
     onAutoSaveStopPoint: (surah: String, ayah: Int, page: Int) -> Unit = { _, _, _ -> },
     onLogProgress: (surah: String, ayah: Int, page: Int, pagesReadToday: Int) -> Unit,
@@ -163,6 +165,7 @@ fun MainDashboardScreen(
     val context = LocalContext.current
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val spiritualMessages by localStorage.spiritualMessagesFlow.collectAsState()
+    val cumulativeAdhkarTasbeehTotal by localStorage.cumulativeAdhkarTasbeehFlow.collectAsState()
     var activeStartupMessage by remember { mutableStateOf<SpiritualMessageItem?>(null) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var selectedHistorySubTab by remember { mutableIntStateOf(0) } // 0: قراءات المصحف, 1: رسائل وأدعية الفتح
@@ -183,12 +186,21 @@ fun MainDashboardScreen(
     }
 
     LaunchedEffect(selectedBottomTab, activeTrack) {
-        val tId = activeTrack.trackId
-        val savedPage = quranPrefs.getInt("last_read_page_$tId", activeTrack.currentPage)
-        lastReadPage = if (savedPage in 1..604) savedPage else activeTrack.currentPage
-        lastReadSurah = quranPrefs.getString("last_read_surah_$tId", activeTrack.currentSurah) ?: activeTrack.currentSurah
-        lastReadAyah = quranPrefs.getInt("last_read_ayah_$tId", activeTrack.currentAyah)
-        quranTargetPage = lastReadPage
+        if (activeTrack.isFixedSurahWerd) {
+            val fixedPage = activeTrack.fixedSurahStartPage.coerceIn(1, 604)
+            val fixedSurah = activeTrack.fixedSurahName.ifBlank { activeTrack.currentSurah }
+            lastReadPage = fixedPage
+            lastReadSurah = fixedSurah
+            lastReadAyah = 1
+            quranTargetPage = fixedPage
+        } else {
+            val tId = activeTrack.trackId
+            val savedPage = quranPrefs.getInt("last_read_page_$tId", activeTrack.currentPage)
+            lastReadPage = if (savedPage in 1..604) savedPage else activeTrack.currentPage
+            lastReadSurah = quranPrefs.getString("last_read_surah_$tId", activeTrack.currentSurah) ?: activeTrack.currentSurah
+            lastReadAyah = quranPrefs.getInt("last_read_ayah_$tId", activeTrack.currentAyah)
+            quranTargetPage = lastReadPage
+        }
     }
 
     var showInputDialog by remember { mutableStateOf(false) }
@@ -207,7 +219,7 @@ fun MainDashboardScreen(
             if (selectedBottomTab != 1) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 4.dp
+                    shadowElevation = 3.dp
                 ) {
                     Column(
                         modifier = Modifier
@@ -226,28 +238,28 @@ fun MainDashboardScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 MihrabiLogo(
-                                    size = 36.dp,
+                                    size = 34.dp,
                                     showIntegratedText = false,
                                     animatedGlow = false
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "محرابي",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = GoldAccent,
-                                        fontSize = 18.sp
-                                    )
-                                    Text(
-                                        text = "وِردُكَ.. خلوتُكَ.. ومحرابُك",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1
-                                    )
-                                }
+                                Text(
+                                    text = "محرابي",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontFamily = AmiriFontFamily,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = EmeraldGreen,
+                                    fontSize = 20.sp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "• وِردُكَ ومحرابُك",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = GoldAccent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
                             }
 
                             Row(
@@ -262,10 +274,10 @@ fun MainDashboardScreen(
                                         activeStartupMessage = latest
                                     },
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(34.dp)
                                         .testTag("top_spiritual_message_button")
                                 ) {
-                                    DoveAndMessageIcon(modifier = Modifier.size(22.dp))
+                                    DoveAndMessageIcon(modifier = Modifier.size(21.dp))
                                 }
 
                                 // Backup & Restore Progress Button
@@ -274,25 +286,26 @@ fun MainDashboardScreen(
                                     shape = RoundedCornerShape(10.dp),
                                     border = BorderStroke(1.dp, GoldAccent),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = RoyalNavyDark,
-                                        contentColor = GoldAccent
+                                        containerColor = Color(0xFFFDF8EC),
+                                        contentColor = EmeraldGreen
                                     ),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
                                     modifier = Modifier
-                                        .height(34.dp)
+                                        .height(32.dp)
                                         .testTag("top_backup_restore_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Backup,
                                         contentDescription = "نسخ احتياطي واستعادة",
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "نسخ احتياطي",
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen,
                                         maxLines = 1,
                                         softWrap = false
                                     )
@@ -300,13 +313,13 @@ fun MainDashboardScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(5.dp))
 
-                        // Row 2: Full-Width Balanced 2-Line Waqf & Sadaqah Jariyah Banner (Clickable for Full Waqf Card)
+                        // Row 2: Full-Width Unclipped Light Mushaf Waqf & Sadaqah Jariyah Banner
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF0A192F).copy(alpha = 0.9f),
-                            border = BorderStroke(0.8.dp, GoldBorder),
+                            color = Color(0xFFF3E9D2),
+                            border = BorderStroke(0.9.dp, GoldBorder),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
@@ -316,19 +329,18 @@ fun MainDashboardScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = WAQF_LINE_1,
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 15.sp,
-                                    color = GoldAccent,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.5.sp,
+                                    color = EmeraldGreen,
                                     textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                    maxLines = 2,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Text(
@@ -337,10 +349,9 @@ fun MainDashboardScreen(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.5.sp,
                                     lineHeight = 14.sp,
-                                    color = Color(0xFFE6F1FF),
+                                    color = Color(0xFF1A110B),
                                     textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                    maxLines = 2,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -398,37 +409,41 @@ fun MainDashboardScreen(
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Multi-Track Selector Row
+                        // Multi-Track Selector Row (Concise & High Contrast)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "متابعة الأوراد المخصصة:",
+                                text = "الأوراد المخصصة",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = GoldAccent,
+                                color = EmeraldGreen,
                                 fontWeight = FontWeight.Bold
                             )
                             Button(
                                 onClick = { showCreateTrackDialog = true },
                                 shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = EmeraldGreen,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                    contentColor = Color.White
                                 ),
-                                modifier = Modifier.testTag("add_track_button")
+                                modifier = Modifier
+                                    .height(36.dp)
+                                    .testTag("add_track_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Add,
                                     contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "إضافة ورد جديد",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold
+                                    text = "إضافة ورد",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
                             }
                         }
@@ -441,17 +456,28 @@ fun MainDashboardScreen(
                         ) {
                             items(tracks) { track ->
                                 val isSelected = track.trackId == activeTrack.trackId
+                                val targetStartPage = if (track.isFixedSurahWerd) {
+                                    track.fixedSurahStartPage.coerceIn(1, 604)
+                                } else {
+                                    track.currentPage.coerceIn(1, 604)
+                                }
+                                val targetSurahLabel = if (track.isFixedSurahWerd) {
+                                    "سورة ${track.fixedSurahName.ifBlank { track.currentSurah }} • ص $targetStartPage"
+                                } else {
+                                    "ص ${track.currentPage} • ${track.currentSurah}"
+                                }
+
                                 Card(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .clip(RoundedCornerShape(18.dp))
                                         .clickable { onSelectTrack(track.trackId) }
                                         .border(
-                                            width = if (isSelected) 2.dp else 0.5.dp,
-                                            color = if (isSelected) GoldAccent else GoldBorder,
-                                            shape = RoundedCornerShape(20.dp)
+                                            width = if (isSelected) 1.8.dp else 0.8.dp,
+                                            color = if (isSelected) EmeraldGreen else GoldBorder,
+                                            shape = RoundedCornerShape(18.dp)
                                         ),
                                     colors = CardDefaults.cardColors(
-                                        containerColor = if (isSelected) RoyalNavyDark else MaterialTheme.colorScheme.surface
+                                        containerColor = if (isSelected) Color(0xFFEBE1C9) else MaterialTheme.colorScheme.surface
                                     )
                                 ) {
                                     Row(
@@ -459,17 +485,34 @@ fun MainDashboardScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = track.trackName,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) EmeraldGreen else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                if (track.isFixedSurahWerd) {
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = GoldAccent.copy(alpha = 0.16f)
+                                                    ) {
+                                                        Text(
+                                                            text = "سورة ثابتة",
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = GoldAccent,
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
                                             Text(
-                                                text = track.trackName,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) GoldAccent else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = "صفحة ${track.currentPage} • ${track.currentSurah}",
+                                                text = targetSurahLabel,
                                                 style = MaterialTheme.typography.bodySmall,
-                                                fontSize = 10.sp,
-                                                color = if (isSelected) GoldAccent.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                                fontSize = 10.5.sp,
+                                                color = if (isSelected) GoldAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
@@ -482,21 +525,22 @@ fun MainDashboardScreen(
                                                 .clip(CircleShape)
                                                 .clickable {
                                                     onSelectTrack(track.trackId)
-                                                    val target = track.currentPage.coerceIn(1, 604)
-                                                    quranTargetPage = target
-                                                    quranPrefs.edit()
-                                                        .putInt("last_read_page", target)
-                                                        .putString("last_read_surah", track.currentSurah)
-                                                        .putInt("last_read_ayah", track.currentAyah)
-                                                        .apply()
+                                                    quranTargetPage = targetStartPage
+                                                    if (!track.isFixedSurahWerd) {
+                                                        quranPrefs.edit()
+                                                            .putInt("last_read_page", targetStartPage)
+                                                            .putString("last_read_surah", track.currentSurah)
+                                                            .putInt("last_read_ayah", track.currentAyah)
+                                                            .apply()
+                                                    }
                                                     selectedBottomTab = 1
                                                 }
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
                                                     imageVector = Icons.Default.MenuBook,
-                                                    contentDescription = "استكمال القراءة في المصحف",
-                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    contentDescription = "فتح في المصحف",
+                                                    tint = Color.White,
                                                     modifier = Modifier.size(15.dp)
                                                 )
                                             }
@@ -505,10 +549,10 @@ fun MainDashboardScreen(
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Icon(
                                                 imageVector = Icons.Default.Edit,
-                                                contentDescription = "تعديل اسم الورد",
+                                                contentDescription = "تعديل الورد",
                                                 tint = GoldAccent,
                                                 modifier = Modifier
-                                                    .size(14.dp)
+                                                    .size(15.dp)
                                                     .clickable { showRenameTrackDialog = true }
                                             )
                                         }
@@ -526,99 +570,70 @@ fun MainDashboardScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // Circular Progress Card for Active Track
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(1.dp, GoldBorder, RoundedCornerShape(20.dp)),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(
+                        if (activeTrack.isFixedSurahWerd) {
+                            // Dedicated Quick-Surah Werd Card (e.g., سورة الكهف كل جمعة - بدون احتسابها كتقدم ختمة)
+                            val fixedSurah = activeTrack.fixedSurahName.ifBlank { activeTrack.currentSurah }
+                            val fixedPage = activeTrack.fixedSurahStartPage.coerceIn(1, 604)
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                    .border(1.2.dp, GoldAccent, RoundedCornerShape(20.dp)),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Text(
-                                    text = "${activeTrack.trackName} - (الختمة رقم ${activeTrack.khatmaNumber})",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = GoldAccent
-                                )
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.size(160.dp)
-                                ) {
-                                    val strokeWidth = 14.dp
-                                    val primaryColor = GoldAccent
-                                    val backgroundColor = RoyalNavyDark.copy(alpha = 0.2f)
-                                    val progressSweep = (metrics.progressPercentage / 100.0 * 360.0).toFloat()
-
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawArc(
-                                            color = backgroundColor,
-                                            startAngle = 0f,
-                                            sweepAngle = 360f,
-                                            useCenter = false,
-                                            style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-                                        )
-                                        drawArc(
-                                            color = primaryColor,
-                                            startAngle = -90f,
-                                            sweepAngle = progressSweep,
-                                            useCenter = false,
-                                            style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-                                        )
-                                    }
-
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            text = "${metrics.progressPercentage}%",
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "${metrics.currentPage} / 604 صفحة",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(18.dp))
-
-                                // Dual Action Buttons for Active Track: Resume Reading & Log Progress
                                 Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    // Primary Button 1: Resume Reading this specific track directly in the Mus-haf
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = Color(0xFFEBE1C9),
+                                        border = BorderStroke(1.dp, GoldAccent)
+                                    ) {
+                                        Text(
+                                            text = "📖 ورد سورة مخصصة (وصول سريع)",
+                                            color = EmeraldGreen,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "${activeTrack.trackName} • سورة $fixedSurah",
+                                        fontFamily = AmiriFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 22.sp,
+                                        color = EmeraldGreen,
+                                        textAlign = TextAlign.Center
+                                    )
+
+                                    Text(
+                                        text = "يفتح المصحف دائماً على بداية سورة $fixedSurah (صفحة $fixedPage) دون تغيير موضعها أو احتسابها كختمة",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 18.sp
+                                    )
+
                                     Button(
                                         onClick = {
-                                            val target = activeTrack.currentPage.coerceIn(1, 604)
-                                            quranTargetPage = target
-                                            quranPrefs.edit()
-                                                .putInt("last_read_page", target)
-                                                .putString("last_read_surah", activeTrack.currentSurah)
-                                                .putInt("last_read_ayah", activeTrack.currentAyah)
-                                                .apply()
+                                            quranTargetPage = fixedPage
                                             selectedBottomTab = 1
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .defaultMinSize(minHeight = 48.dp)
+                                            .height(48.dp)
                                             .testTag("resume_track_primary_button"),
                                         shape = RoundedCornerShape(14.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = EmeraldGreen,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                            contentColor = Color.White
                                         )
                                     ) {
                                         Icon(
@@ -628,158 +643,279 @@ fun MainDashboardScreen(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "متابعة قراءة ${activeTrack.trackName} (صفحة ${activeTrack.currentPage})",
-                                            style = MaterialTheme.typography.titleMedium,
+                                            text = "قراءة سورة $fixedSurah الآن (ص $fixedPage)",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            color = Color.White,
+                                            maxLines = 1
                                         )
                                     }
 
-                                    // Secondary Button 2: Log Progress / Stop Point
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                autoTriggerCameraInDialog = false
-                                                showInputDialog = true
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .defaultMinSize(minHeight = 46.dp)
-                                                .testTag("log_progress_button"),
-                                            shape = RoundedCornerShape(14.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                            border = BorderStroke(1.dp, GoldBorder),
-                                            colors = ButtonDefaults.outlinedButtonColors(
-                                                contentColor = GoldAccent
-                                            )
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Add,
-                                                contentDescription = null,
-                                                tint = GoldAccent,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "تسجيل نقطة التوقف",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                autoTriggerCameraInDialog = true
-                                                showInputDialog = true
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .defaultMinSize(minHeight = 46.dp)
-                                                .testTag("camera_stop_point_button"),
-                                            shape = RoundedCornerShape(14.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = RoyalNavyDark,
-                                                contentColor = GoldAccent
-                                            ),
-                                            border = BorderStroke(1.dp, GoldAccent)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.CameraAlt,
-                                                contentDescription = "تصوير صفحة المصحف بالكاميرا",
-                                                tint = GoldAccent,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "تصوير الوقف بالكاميرا",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-
-                                    // Dedicated Alarm Reminder Button for the Active Werd Track
                                     AlarmTriggerChip(
                                         targetId = "werd_${activeTrack.trackId}",
-                                        defaultTitle = "منبه الورد القرآني (${activeTrack.trackName})",
-                                        defaultSubtitle = "تذكير بقراءة وردك اليومي (${activeTrack.trackName} - صفحة ${activeTrack.currentPage})",
-                                        defaultHour = 20,
+                                        defaultTitle = "منبه ${activeTrack.trackName} (سورة $fixedSurah)",
+                                        defaultSubtitle = "تذكير بقراءة سورة $fixedSurah المباركة (صفحة $fixedPage)",
+                                        defaultHour = 10,
                                         defaultMinute = 0,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
+                        } else {
+                            // Circular Progress Card for Full Khatma Track
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, GoldBorder, RoundedCornerShape(20.dp)),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "${activeTrack.trackName} • الختمة ${activeTrack.khatmaNumber}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.size(152.dp)
+                                    ) {
+                                        val strokeWidth = 13.dp
+                                        val primaryColor = EmeraldGreen
+                                        val backgroundColor = GoldBorder.copy(alpha = 0.35f)
+                                        val progressSweep = (metrics.progressPercentage / 100.0 * 360.0).toFloat()
+
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawArc(
+                                                color = backgroundColor,
+                                                startAngle = 0f,
+                                                sweepAngle = 360f,
+                                                useCenter = false,
+                                                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                                            )
+                                            drawArc(
+                                                color = primaryColor,
+                                                startAngle = -90f,
+                                                sweepAngle = progressSweep,
+                                                useCenter = false,
+                                                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                                            )
+                                        }
+
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                text = "${metrics.progressPercentage}%",
+                                                style = MaterialTheme.typography.headlineMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EmeraldGreen
+                                            )
+                                            Text(
+                                                text = "${metrics.currentPage} / 604 صفحة",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    // Concise, Unclipped Action Buttons for Active Khatma Track
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Primary Button 1: متابعة القراءة (ص X)
+                                        Button(
+                                            onClick = {
+                                                val target = activeTrack.currentPage.coerceIn(1, 604)
+                                                quranTargetPage = target
+                                                quranPrefs.edit()
+                                                    .putInt("last_read_page", target)
+                                                    .putString("last_read_surah", activeTrack.currentSurah)
+                                                    .putInt("last_read_ayah", activeTrack.currentAyah)
+                                                    .apply()
+                                                selectedBottomTab = 1
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .defaultMinSize(minHeight = 46.dp)
+                                                .testTag("resume_track_primary_button"),
+                                            shape = RoundedCornerShape(14.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = EmeraldGreen,
+                                                contentColor = Color.White
+                                            )
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MenuBook,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(19.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "متابعة القراءة (ص ${activeTrack.currentPage} • ${activeTrack.currentSurah})",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.5.sp,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        // Secondary Row: تسجيل الوقف | تصوير الصفحة
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    autoTriggerCameraInDialog = false
+                                                    showInputDialog = true
+                                                },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .defaultMinSize(minHeight = 44.dp)
+                                                    .testTag("log_progress_button"),
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                border = BorderStroke(1.2.dp, EmeraldGreen),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = Color(0xFFFDF8EC),
+                                                    contentColor = EmeraldGreen
+                                                )
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Bookmark,
+                                                    contentDescription = null,
+                                                    tint = EmeraldGreen,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "تسجيل الوقف",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.5.sp,
+                                                    color = EmeraldGreen,
+                                                    maxLines = 1
+                                                )
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    autoTriggerCameraInDialog = true
+                                                    showInputDialog = true
+                                                },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .defaultMinSize(minHeight = 44.dp)
+                                                    .testTag("camera_stop_point_button"),
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = RoyalNavyDark,
+                                                    contentColor = EmeraldGreen
+                                                ),
+                                                border = BorderStroke(1.dp, GoldAccent)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CameraAlt,
+                                                    contentDescription = "تصوير الصفحة",
+                                                    tint = GoldAccent,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text(
+                                                    text = "تصوير الصفحة",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.5.sp,
+                                                    color = EmeraldGreen,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+
+                                        // Dedicated Alarm Reminder Button for the Active Werd Track
+                                        AlarmTriggerChip(
+                                            targetId = "werd_${activeTrack.trackId}",
+                                            defaultTitle = "منبه الورد (${activeTrack.trackName})",
+                                            defaultSubtitle = "تذكير بقراءة وردك اليومي (${activeTrack.trackName} - صفحة ${activeTrack.currentPage})",
+                                            defaultHour = 20,
+                                            defaultMinute = 0,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Telemetry Grid (Shown for Khatma tracks)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                MetricCard(
+                                    modifier = Modifier.weight(1f),
+                                    title = "المتبقي للختم",
+                                    value = "${metrics.remainingPages} صفحة",
+                                    subtitle = "(${metrics.remainingRubCount} ربع حزب)",
+                                    icon = Icons.Default.MenuBook
+                                )
+                                MetricCard(
+                                    modifier = Modifier.weight(1f),
+                                    title = "المعدل اليومي",
+                                    value = "${metrics.actualDailyPacePages} صفحة/يوم",
+                                    subtitle = "~1 ربع/يوم",
+                                    icon = Icons.Default.Speed
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                MetricCard(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable {
+                                            quranTargetPage = activeTrack.currentPage
+                                            selectedBottomTab = 1
+                                        },
+                                    title = "موقع التوقف",
+                                    value = "${activeTrack.currentSurah} - آية ${activeTrack.currentAyah}",
+                                    subtitle = "صفحة ${activeTrack.currentPage} (اضغط للقراءة)",
+                                    icon = Icons.Default.Book
+                                )
+                                MetricCard(
+                                    modifier = Modifier.weight(1f),
+                                    title = "ختام المصحف",
+                                    value = metrics.projectedCompletionDate,
+                                    subtitle = "التاريخ المتوقع",
+                                    icon = Icons.Default.CalendarToday
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Telemetry Grid
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            MetricCard(
-                                modifier = Modifier.weight(1f),
-                                title = "الصفحات والأرباع",
-                                value = "متبقي ${metrics.remainingPages} صفحة",
-                                subtitle = "(${metrics.remainingRubCount} ربع حزب)",
-                                icon = Icons.Default.MenuBook
-                            )
-                            MetricCard(
-                                modifier = Modifier.weight(1f),
-                                title = "المعدل اليومي",
-                                value = "${metrics.actualDailyPacePages} صفحة/يوم",
-                                subtitle = "~1 ربع/يوم",
-                                icon = Icons.Default.Speed
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            MetricCard(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable {
-                                        quranTargetPage = activeTrack.currentPage
-                                        selectedBottomTab = 1
-                                    },
-                                title = "موقع التوقف",
-                                value = "${activeTrack.currentSurah} - آية ${activeTrack.currentAyah}",
-                                subtitle = "صفحة ${activeTrack.currentPage} (اضغط للقراءة)",
-                                icon = Icons.Default.Book
-                            )
-                            MetricCard(
-                                modifier = Modifier.weight(1f),
-                                title = "التاريخ المتوقع",
-                                value = metrics.projectedCompletionDate,
-                                subtitle = "لختام المصحف",
-                                icon = Icons.Default.CalendarToday
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
-                        // Morning & Evening Adhkar Box (2 Buttons)
+                        // Morning & Evening Adhkar Box (2 Buttons + Complete Offline Hisn Al-Muslim)
                         MorningEveningAdhkarBox()
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
                         // Interactive Tasbeeh Counter Section
                         TasbeehSection()
@@ -788,25 +924,35 @@ fun MainDashboardScreen(
 
                 1 -> {
                     // Embedded Offline Mus-haf Reader Tab (with Full-Screen Toggle & Auto-Save on Exit)
+                    val effectiveInitialPage = if (activeTrack.isFixedSurahWerd) {
+                        activeTrack.fixedSurahStartPage.coerceIn(1, 604)
+                    } else {
+                        quranTargetPage
+                    }
                     QuranReaderScreen(
                         activeTrackId = activeTrack.trackId,
                         activeTrackName = activeTrack.trackName,
-                        initialPage = quranTargetPage,
+                        initialPage = effectiveInitialPage,
+                        isFixedSurahWerd = activeTrack.isFixedSurahWerd,
                         isFullScreen = isMushafFullScreen,
                         onToggleFullScreen = { full -> isMushafFullScreen = full },
                         onAutoSaveStopBookmark = { surah, ayah, page ->
-                            quranTargetPage = page
-                            lastReadPage = page
-                            lastReadSurah = surah
-                            lastReadAyah = ayah
-                            onAutoSaveStopPoint(surah, ayah, page)
+                            if (!activeTrack.isFixedSurahWerd) {
+                                quranTargetPage = page
+                                lastReadPage = page
+                                lastReadSurah = surah
+                                lastReadAyah = ayah
+                                onAutoSaveStopPoint(surah, ayah, page)
+                            }
                         },
                         onSaveStopBookmark = { surah, ayah, page ->
                             onLogProgress(surah, ayah, page, (page - activeTrack.currentPage).coerceAtLeast(1))
-                            quranTargetPage = page
-                            lastReadPage = page
-                            lastReadSurah = surah
-                            lastReadAyah = ayah
+                            if (!activeTrack.isFixedSurahWerd) {
+                                quranTargetPage = page
+                                lastReadPage = page
+                                lastReadSurah = surah
+                                lastReadAyah = ayah
+                            }
                         }
                     )
                 }
@@ -818,7 +964,7 @@ fun MainDashboardScreen(
 
                 3 -> {
                     // Unified History View ("السجل"):
-                    // 1) تصفح القراءة في المصحف  2) الرسائل والأدعية التي تظهر عند فتح التطبيق
+                    // 1) إجمالي الأذكار والتسبيحات التراكمي  2) تصفح القراءة في المصحف  3) رسائل البداية
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -832,13 +978,13 @@ fun MainDashboardScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "السجل الشامل",
+                                    text = "السجل والإحصائيات",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = GoldAccent,
+                                    color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "سجل قراءات المصحف + رسائل وأدعية فتح التطبيق",
+                                    text = "إجمالي التسبيحات والأذكار + قراءات المصحف + رسائل الفتح",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                                     fontSize = 11.sp
@@ -849,7 +995,7 @@ fun MainDashboardScreen(
                                 onClick = { showBackupDialog = true },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = RoyalNavyDark,
-                                    contentColor = GoldAccent
+                                    contentColor = EmeraldGreen
                                 ),
                                 border = BorderStroke(1.dp, GoldAccent),
                                 shape = RoundedCornerShape(12.dp),
@@ -859,20 +1005,91 @@ fun MainDashboardScreen(
                                 Icon(
                                     imageVector = Icons.Default.Backup,
                                     contentDescription = null,
+                                    tint = GoldAccent,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = "نسخ احتياطي / استعادة",
+                                    text = "نسخ احتياطي",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen,
                                     maxLines = 1,
                                     softWrap = false
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // All-Time Cumulative Adhkar & Tasbeeh Counter Card (Point 7)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFFF3E9D2),
+                            border = BorderStroke(1.4.dp, GoldAccent),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("cumulative_adhkar_tasbeeh_card")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(EmeraldGreen.copy(alpha = 0.14f))
+                                            .border(1.dp, EmeraldGreen, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.TouchApp,
+                                            contentDescription = null,
+                                            tint = EmeraldGreen,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "إجمالي الأذكار والتسبيحات التراكمي",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp,
+                                            color = EmeraldGreen
+                                        )
+                                        Text(
+                                            text = "مجموع كل تسبيحة وذكر قرأته في التطبيق (محفوظ دائماً)",
+                                            fontSize = 10.5.sp,
+                                            color = Color(0xFF1A110B).copy(alpha = 0.72f)
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = EmeraldGreen,
+                                    border = BorderStroke(1.dp, GoldAccent)
+                                ) {
+                                    Text(
+                                        text = "$cumulativeAdhkarTasbeehTotal",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 18.sp,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // Segmented Sub-Tab Switcher: [سجل تصفح المصحف] | [سجل الرسائل والأدعية]
                         Row(
@@ -887,7 +1104,7 @@ fun MainDashboardScreen(
                             val isReadingTab = selectedHistorySubTab == 0
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isReadingTab) EmeraldGreen else androidx.compose.ui.graphics.Color.Transparent,
+                                color = if (isReadingTab) EmeraldGreen else Color.Transparent,
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(10.dp))
@@ -902,13 +1119,13 @@ fun MainDashboardScreen(
                                     Icon(
                                         imageVector = Icons.Default.MenuBook,
                                         contentDescription = null,
-                                        tint = if (isReadingTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        tint = if (isReadingTab) Color.White else EmeraldGreen,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "قراءات المصحف (${readingLogs.size})",
-                                        color = if (isReadingTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        color = if (isReadingTab) Color.White else EmeraldGreen,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         maxLines = 1,
@@ -920,7 +1137,7 @@ fun MainDashboardScreen(
                             val isMessagesTab = selectedHistorySubTab == 1
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isMessagesTab) EmeraldGreen else androidx.compose.ui.graphics.Color.Transparent,
+                                color = if (isMessagesTab) EmeraldGreen else Color.Transparent,
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(10.dp))
@@ -936,7 +1153,7 @@ fun MainDashboardScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "رسائل الفتح (${spiritualMessages.size})",
-                                        color = if (isMessagesTab) androidx.compose.ui.graphics.Color.White else GoldAccent,
+                                        color = if (isMessagesTab) Color.White else EmeraldGreen,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         maxLines = 1,
@@ -946,7 +1163,7 @@ fun MainDashboardScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         if (selectedHistorySubTab == 0) {
                             // SUB-TAB 0: Mushaf Reading & Stop-Point Logs
@@ -1146,7 +1363,7 @@ fun MainDashboardScreen(
                                                         DoveAndMessageIcon(modifier = Modifier.size(18.dp))
                                                         Spacer(modifier = Modifier.width(6.dp))
                                                         Text(
-                                                            text = "رسالة من مطور التطبيق 🕊️✉️",
+                                                            text = "رسائل إيمانية 🕊️✉️",
                                                             fontSize = 11.5.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             color = GoldAccent
@@ -1355,33 +1572,187 @@ fun MainDashboardScreen(
     }
 
     if (showCreateTrackDialog) {
-        var newTrackName by remember { mutableStateOf("") }
+        var isFixedSurahMode by remember { mutableStateOf(true) } // Default to Quick Fixed Surah Werd like سورة الكهف
+        var selectedFixedSurah by remember {
+            mutableStateOf(QuranDataHelper.surahs.find { it.number == 18 } ?: QuranDataHelper.surahs.first())
+        }
+        var newTrackName by remember { mutableStateOf("ورد سورة الكهف") }
+        var isSurahMenuExpanded by remember { mutableStateOf(false) }
+
+        val popularSurahNums = remember { listOf(18, 67, 36, 56, 32, 44, 2) } // الكهف، الملك، يس، الواقعة، السجدة، الدخان، البقرة
+
         AlertDialog(
             onDismissRequest = { showCreateTrackDialog = false },
-            title = { Text("إضافة ورد / جروب متابعة جديد", color = GoldAccent) },
-            text = {
-                OutlinedTextField(
-                    value = newTrackName,
-                    onValueChange = { newTrackName = it },
-                    label = { Text("اسم الورد (مثال: جروب الفجر / ورد المساء)") },
-                    modifier = Modifier.fillMaxWidth()
+            title = {
+                Text(
+                    text = "إضافة ورد جديد",
+                    color = EmeraldGreen,
+                    fontWeight = FontWeight.Bold
                 )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Mode Selector: [ورد سورة محددة] vs [ختمة كاملة]
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(RoyalNavyDark)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isFixedSurahMode) EmeraldGreen else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    isFixedSurahMode = true
+                                    newTrackName = "ورد سورة ${selectedFixedSurah.nameArabic}"
+                                }
+                        ) {
+                            Text(
+                                text = "ورد سورة محددة",
+                                color = if (isFixedSurahMode) Color.White else EmeraldGreen,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (!isFixedSurahMode) EmeraldGreen else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    isFixedSurahMode = false
+                                    newTrackName = ""
+                                }
+                        ) {
+                            Text(
+                                text = "ختمة كاملة",
+                                color = if (!isFixedSurahMode) Color.White else EmeraldGreen,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    if (isFixedSurahMode) {
+                        Text(
+                            text = "اختر السورة ليفتح عليها المصحف من بدايتها في كل مرة بدون احتسابها كتقدم ختمة (مثال: سورة الكهف كل جمعة):",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                            lineHeight = 17.sp
+                        )
+
+                        // Quick Popular Surah Chips
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(popularSurahNums) { sNum ->
+                                val sObj = QuranDataHelper.surahs.find { it.number == sNum }
+                                if (sObj != null) {
+                                    val isChosen = selectedFixedSurah.number == sObj.number
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = if (isChosen) EmeraldGreen else Color(0xFFFDF8EC),
+                                        border = BorderStroke(1.dp, if (isChosen) EmeraldGreen else GoldBorder),
+                                        modifier = Modifier.clickable {
+                                            selectedFixedSurah = sObj
+                                            newTrackName = "ورد سورة ${sObj.nameArabic}"
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "سورة ${sObj.nameArabic}",
+                                            color = if (isChosen) Color.White else EmeraldGreen,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.5.sp,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Full 114 Surah Dropdown
+                        ExposedDropdownMenuBox(
+                            expanded = isSurahMenuExpanded,
+                            onExpandedChange = { isSurahMenuExpanded = !isSurahMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                value = "سورة ${selectedFixedSurah.nameArabic} (تبدأ من صفحة ${selectedFixedSurah.startPage})",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("السورة المختارة") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSurahMenuExpanded) },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = isSurahMenuExpanded,
+                                onDismissRequest = { isSurahMenuExpanded = false }
+                            ) {
+                                QuranDataHelper.surahs.forEach { surah ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text("${surah.number}. سورة ${surah.nameArabic} (ص ${surah.startPage})")
+                                        },
+                                        onClick = {
+                                            selectedFixedSurah = surah
+                                            newTrackName = "ورد سورة ${surah.nameArabic}"
+                                            isSurahMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newTrackName,
+                        onValueChange = { newTrackName = it },
+                        label = {
+                            Text(if (isFixedSurahMode) "اسم الورد (مثال: ورد الكهف)" else "اسم الختمة (مثال: ختمة التدبر)")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (newTrackName.isNotBlank()) {
-                            onCreateTrack(newTrackName.trim())
-                            showCreateTrackDialog = false
+                        val cleanName = newTrackName.trim().ifBlank {
+                            if (isFixedSurahMode) "ورد سورة ${selectedFixedSurah.nameArabic}" else "ختمة مخصصة"
                         }
+                        if (isFixedSurahMode) {
+                            onCreateFixedSurahTrack(
+                                cleanName,
+                                selectedFixedSurah.nameArabic,
+                                selectedFixedSurah.startPage
+                            )
+                        } else {
+                            onCreateTrack(cleanName)
+                        }
+                        showCreateTrackDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoyalNavyDark, contentColor = GoldAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen, contentColor = Color.White)
                 ) {
-                    Text("إضافة")
+                    Text("إضافة الورد", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCreateTrackDialog = false }) { Text("إلغاء") }
+                TextButton(onClick = { showCreateTrackDialog = false }) { Text("إلغاء", color = GoldAccent) }
             }
         )
     }
@@ -1390,14 +1761,29 @@ fun MainDashboardScreen(
         var renameInput by remember { mutableStateOf(activeTrack.trackName) }
         AlertDialog(
             onDismissRequest = { showRenameTrackDialog = false },
-            title = { Text("تعديل اسم الورد", color = GoldAccent) },
+            title = { Text("تعديل أو حذف الورد", color = EmeraldGreen, fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = renameInput,
-                    onValueChange = { renameInput = it },
-                    label = { Text("الاسم الجديد") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = renameInput,
+                        onValueChange = { renameInput = it },
+                        label = { Text("اسم الورد") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (activeTrack.trackId != "main") {
+                        OutlinedButton(
+                            onClick = {
+                                onDeleteTrack(activeTrack.trackId)
+                                showRenameTrackDialog = false
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("حذف هذا الورد المخصص", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             },
             confirmButton = {
                 Button(
@@ -1407,9 +1793,9 @@ fun MainDashboardScreen(
                             showRenameTrackDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoyalNavyDark, contentColor = GoldAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen, contentColor = Color.White)
                 ) {
-                    Text("حفظ")
+                    Text("حفظ الاسم")
                 }
             },
             dismissButton = {
@@ -1665,7 +2051,7 @@ private fun StopPointInputDialog(
                         Text(
                             text = "صوّر صفحة المصحف التي وقفت عندها وسيتم التعرف تلقائياً على رقم الصفحة والسورة والآية.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = androidx.compose.ui.graphics.Color(0xFFFDF8EE).copy(alpha = 0.9f),
+                            color = Color(0xFF1A110B).copy(alpha = 0.85f),
                             textAlign = TextAlign.Center,
                             fontSize = 11.sp
                         )
@@ -2112,9 +2498,8 @@ fun TasbeehSection() {
         )
     }
 
-    val backupVersion by remember {
-        LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
-    }.collectAsState()
+    val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
+    val backupVersion by localStorage.backupRestoreVersionFlow.collectAsState()
 
     val counts = remember(backupVersion) {
         mutableStateMapOf<String, Int>().apply {
@@ -2163,13 +2548,13 @@ fun TasbeehSection() {
                         text = "عداد التسبيح والأذكار",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = GoldAccent
+                        color = EmeraldGreen
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "إجمالي التسبيحات: $totalCount",
+                        text = "إجمالي التسبيحات الحالية: $totalCount",
                         style = MaterialTheme.typography.bodySmall,
-                        color = EmeraldGreen,
+                        color = GoldAccent,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -2238,6 +2623,7 @@ fun TasbeehSection() {
                                 val newCount = count + 1
                                 counts[dhikr.key] = newCount
                                 prefs.edit().putInt(dhikr.key, newCount).apply()
+                                localStorage.incrementCumulativeAdhkarTasbeeh(1)
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                             .border(

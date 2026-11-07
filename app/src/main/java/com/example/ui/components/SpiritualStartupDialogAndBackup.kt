@@ -53,7 +53,7 @@ import java.util.Date
 import java.util.Locale
 
 const val WAQF_LINE_1 = "إعداد: آسر الشربيني • وقفٌ لله تعالى وصدقةٌ جارية عني وعن والديّ"
-const val WAQF_LINE_2 = "اللهم اغفر لأبي وارحمه، وأدم على أمي الصحة والعافية وطول العمر في طاعتك ورضاك"
+const val WAQF_LINE_2 = "اللهم اغفر لأبي وارحمه، وأدم على أمي الصحة والعافية وطول العمر في طاعتك"
 
 fun shareSpiritualMessage(context: Context, message: SpiritualMessageItem) {
     val shareBody = buildString {
@@ -91,9 +91,9 @@ fun WaqfDedicationDialog(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF0A192F),
-                            Color(0xFF112240),
-                            Color(0xFF0A192F)
+                            Color(0xFFFDF8EC),
+                            Color(0xFFF5EFE0),
+                            Color(0xFFFDF8EC)
                         )
                     )
                 )
@@ -107,12 +107,12 @@ fun WaqfDedicationDialog(
             ) {
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = Color(0xFF162C4E),
+                    color = Color(0xFFEBE1C9),
                     border = BorderStroke(1.dp, GoldAccent)
                 ) {
                     Text(
                         text = "🕌 وقفٌ لله تعالى وصدقةٌ جارية",
-                        color = GoldAccent,
+                        color = EmeraldGreen,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -123,7 +123,7 @@ fun WaqfDedicationDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF162C4E))
+                        .background(Color(0xFFF3E9D2))
                         .border(1.dp, GoldBorder, RoundedCornerShape(16.dp))
                         .padding(16.dp)
                 ) {
@@ -134,7 +134,7 @@ fun WaqfDedicationDialog(
                     ) {
                         Text(
                             text = WAQF_LINE_1,
-                            color = GoldAccent,
+                            color = EmeraldGreen,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.5.sp,
                             textAlign = TextAlign.Center,
@@ -146,7 +146,7 @@ fun WaqfDedicationDialog(
                         )
                         Text(
                             text = WAQF_LINE_2,
-                            color = Color(0xFFF8FAF2),
+                            color = Color(0xFF1A110B),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center,
@@ -206,9 +206,9 @@ fun SpiritualStartupMessageDialog(
     onShare: () -> Unit,
     onDismissClose: () -> Unit
 ) {
-    val navyCardTop = Color(0xFF112240)
-    val navyCardBottom = Color(0xFF162C4E)
-    val luminousText = Color(0xFFF8FAF2)
+    val mushafCardTop = Color(0xFFFDF8EC)
+    val mushafCardBottom = Color(0xFFF3E9D2)
+    val darkInkText = Color(0xFF1A110B)
 
     Dialog(
         onDismissRequest = onDismissClose,
@@ -221,9 +221,9 @@ fun SpiritualStartupMessageDialog(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF0A192F),
-                            Color(0xFF112240),
-                            Color(0xFF0A192F)
+                            Color(0xFFFDF8EC),
+                            Color(0xFFF5EFE0),
+                            Color(0xFFFDF8EC)
                         )
                     )
                 )
@@ -245,7 +245,6 @@ fun SpiritualStartupMessageDialog(
                     val stroke = Stroke(width = 1.4.dp.toPx())
                     val ornamentColor = GoldAccent.copy(alpha = 0.32f)
 
-                    // 4 Corner double-arcs
                     drawArc(
                         color = ornamentColor,
                         startAngle = 0f,
@@ -290,10 +289,10 @@ fun SpiritualStartupMessageDialog(
                         .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // 1. Small ornate top header: "رسالة من مطور التطبيق" with Dove & Envelope crest
+                    // 1. Small ornate top header: "رسائل إيمانية" with Dove & Envelope crest
                     Surface(
                         shape = RoundedCornerShape(50),
-                        color = Color(0xFF162C4E),
+                        color = Color(0xFFEBE1C9),
                         border = BorderStroke(1.dp, GoldAccent)
                     ) {
                         Row(
@@ -301,12 +300,11 @@ fun SpiritualStartupMessageDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            // Custom Dove + Envelope Golden Emblem
                             DoveAndMessageIcon(modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "رسالة من مطور التطبيق",
-                                color = GoldAccent,
+                                text = "رسائل إيمانية",
+                                color = EmeraldGreen,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -323,8 +321,8 @@ fun SpiritualStartupMessageDialog(
                     // 2. Category Pill (Quranic Dua / Prophetic Hadith / Qudsi Hadith)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = EmeraldGreen.copy(alpha = 0.35f),
-                        border = BorderStroke(0.8.dp, GoldAccent)
+                        color = EmeraldGreen.copy(alpha = 0.12f),
+                        border = BorderStroke(0.8.dp, EmeraldGreen)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -339,7 +337,7 @@ fun SpiritualStartupMessageDialog(
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = message.categoryTitle,
-                                color = Color(0xFFF8FAF2),
+                                color = EmeraldGreen,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -348,14 +346,14 @@ fun SpiritualStartupMessageDialog(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // 3. Unified Royal Navy & Deep Emerald Illuminated Card
+                    // 3. Unified Light Mushaf Illuminated Card
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
                             .background(
                                 Brush.verticalGradient(
-                                    colors = listOf(navyCardTop, navyCardBottom, navyCardTop)
+                                    colors = listOf(mushafCardTop, mushafCardBottom, mushafCardTop)
                                 )
                             )
                             .border(1.5.dp, GoldAccent, RoundedCornerShape(18.dp))
@@ -365,7 +363,6 @@ fun SpiritualStartupMessageDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Top decorative star divider
                             Text(
                                 text = "۞ ❁ ۞",
                                 color = GoldAccent,
@@ -378,7 +375,7 @@ fun SpiritualStartupMessageDialog(
 
                             Text(
                                 text = message.arabicText,
-                                color = luminousText,
+                                color = darkInkText,
                                 fontSize = 19.sp,
                                 lineHeight = 33.sp,
                                 fontWeight = FontWeight.Bold,
@@ -399,7 +396,7 @@ fun SpiritualStartupMessageDialog(
 
                             Text(
                                 text = message.sourceReference,
-                                color = GoldAccent,
+                                color = EmeraldGreen,
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 textAlign = TextAlign.Center
@@ -411,7 +408,7 @@ fun SpiritualStartupMessageDialog(
 
                     Text(
                         text = "تُحفظ هذه الرسالة تلقائياً في تبويب «السجل» للرجوع إليها في أي وقت",
-                        color = Color(0xFFF8FAF2).copy(alpha = 0.72f),
+                        color = darkInkText.copy(alpha = 0.72f),
                         fontSize = 10.5.sp,
                         textAlign = TextAlign.Center
                     )
@@ -424,7 +421,6 @@ fun SpiritualStartupMessageDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Button 1: تمت القراءة
                         Button(
                             onClick = onMarkReadAndClose,
                             modifier = Modifier
@@ -453,7 +449,6 @@ fun SpiritualStartupMessageDialog(
                             )
                         }
 
-                        // Button 2: مشاركة
                         OutlinedButton(
                             onClick = onShare,
                             modifier = Modifier
@@ -482,7 +477,6 @@ fun SpiritualStartupMessageDialog(
                             )
                         }
 
-                        // Button 3: غلق
                         OutlinedButton(
                             onClick = onDismissClose,
                             modifier = Modifier
@@ -490,9 +484,9 @@ fun SpiritualStartupMessageDialog(
                                 .height(46.dp)
                                 .testTag("startup_msg_close_button"),
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFDF8EE).copy(alpha = 0.45f)),
+                            border = BorderStroke(1.dp, GoldBorder),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFFFDF8EE)
+                                contentColor = darkInkText
                             ),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                         ) {
@@ -685,29 +679,29 @@ fun BackupRestoreDialog(
                     ) {
                         Text(
                             text = "كل ما يتم حفظه واستعادته في النسخة الاحتياطية:",
-                            color = GoldAccent,
+                            color = EmeraldGreen,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp
                         )
                         Text(
                             text = "📖 الختمة والمصحف: سورة $currentSurah (صفحة $currentPage) • $tracksCount ورد • $logsCount سجل • $hifzCount علامة حفظ",
-                            color = Color(0xFFFDF8EE),
+                            color = Color(0xFF1A110B),
                             fontSize = 11.5.sp
                         )
                         val repeatLabel = if (quranAudioState.targetRepeatCount == -1) "تكرار مستمر" else "${quranAudioState.targetRepeatCount} مرات"
                         Text(
                             text = "🎙️ القارئ والتكرار: الشيخ ${quranAudioState.selectedReciter.nameAr} • التكرار ($repeatLabel)",
-                            color = Color(0xFFFDF8EE),
+                            color = Color(0xFF1A110B),
                             fontSize = 11.5.sp
                         )
                         Text(
                             text = "🕌 الأذان ومواقيت الصلاة: ${adhanSettings.locationName} • ${adhanSettings.calculationMethod.titleAr}",
-                            color = Color(0xFFFDF8EE),
+                            color = Color(0xFF1A110B),
                             fontSize = 11.5.sp
                         )
                         Text(
                             text = "🔔 إشعارات ونغمات الصلوات الخمس: ${adhanSettings.globalAlertMode.titleAr} + تخصيص كل صلاة (${customAlarms.size} منبه مخصص)",
-                            color = Color(0xFFFDF8EE).copy(alpha = 0.9f),
+                            color = Color(0xFF1A110B).copy(alpha = 0.85f),
                             fontSize = 11.sp
                         )
                     }

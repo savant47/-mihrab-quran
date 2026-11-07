@@ -34,7 +34,31 @@ class KhatmaRepository(context: Context) {
             currentPage = 1,
             completedRubCount = 0,
             progressPercentage = 0.0,
-            isCompleted = false
+            isCompleted = false,
+            isFixedSurahWerd = false
+        )
+        val currentTracks = localStorage.tracksFlow.value.toMutableList()
+        currentTracks.add(newTrack)
+        localStorage.saveTracks(currentTracks)
+        return newId
+    }
+
+    fun createFixedSurahTrack(trackName: String, surahName: String, startPage: Int): String {
+        val newId = "surah_werd_${System.currentTimeMillis()}"
+        val clampedStartPage = startPage.coerceIn(1, 604)
+        val newTrack = KhatmaTrack(
+            trackId = newId,
+            trackName = trackName,
+            khatmaNumber = 1,
+            currentSurah = surahName,
+            currentAyah = 1,
+            currentPage = clampedStartPage,
+            completedRubCount = 0,
+            progressPercentage = 0.0,
+            isCompleted = false,
+            isFixedSurahWerd = true,
+            fixedSurahName = surahName,
+            fixedSurahStartPage = clampedStartPage
         )
         val currentTracks = localStorage.tracksFlow.value.toMutableList()
         currentTracks.add(newTrack)

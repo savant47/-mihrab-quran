@@ -9,6 +9,8 @@ data class KhatmaTrack(
     val currentPage: Int = 1,
     val completedRubCount: Int = 0,
     val progressPercentage: Double = 0.0,
-    val isCompleted: Boolean = false
+    val isCompleted: Boolean = false,
+    val isFixedSurahWerd: Boolean = false,
+    val fixedSurahName: String = "",
+    val fixedSurahStartPage: Int = 1
 )
-

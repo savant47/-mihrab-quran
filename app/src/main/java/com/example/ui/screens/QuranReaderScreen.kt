@@ -89,6 +89,7 @@ fun QuranReaderScreen(
     activeTrackId: String = "main",
     activeTrackName: String,
     initialPage: Int,
+    isFixedSurahWerd: Boolean = false,
     isFullScreen: Boolean = false,
     onToggleFullScreen: (Boolean) -> Unit = {},
     onAutoSaveStopBookmark: (surahName: String, ayahNumber: Int, pageNumber: Int) -> Unit = { _, _, _ -> },
@@ -107,8 +108,12 @@ fun QuranReaderScreen(
         QuranAudioPlayerManager.initPreferences(context)
     }
 
-    val savedLastPage = remember(activeTrackId, backupVersion) {
-        quranPrefs.getInt("last_viewed_page_$activeTrackId", initialPage.coerceIn(1, 604)).coerceIn(1, 604)
+    val savedLastPage = remember(activeTrackId, backupVersion, isFixedSurahWerd, initialPage) {
+        if (isFixedSurahWerd) {
+            initialPage.coerceIn(1, 604)
+        } else {
+            quranPrefs.getInt("last_viewed_page_$activeTrackId", initialPage.coerceIn(1, 604)).coerceIn(1, 604)
+        }
     }
 
     var isDatabaseReady by remember { mutableStateOf(false) }
@@ -117,8 +122,14 @@ fun QuranReaderScreen(
         isDatabaseReady = true
     }
 
-    val startPage = remember(activeTrackId, initialPage, backupVersion) {
-        if (initialPage in 1..604) initialPage else savedLastPage
+    val startPage = remember(activeTrackId, initialPage, backupVersion, isFixedSurahWerd) {
+        if (isFixedSurahWerd) {
+            initialPage.coerceIn(1, 604)
+        } else if (initialPage in 1..604) {
+            initialPage
+        } else {
+            savedLastPage
+        }
     }
 
     val pagerState = rememberPagerState(
@@ -138,6 +149,16 @@ fun QuranReaderScreen(
     var fontScaleSp by remember(backupVersion) {
         mutableFloatStateOf(quranPrefs.getFloat("mushaf_font_size_sp_v2", 28f).coerceIn(20f, 38f))
     }
+    var fontZoomStep by remember(backupVersion) {
+        mutableIntStateOf(quranPrefs.getInt("mushaf_font_zoom_step", 0).coerceIn(0, 4))
+    }
+
+    // Single-tap reading focus state (strong light-gray highlight) + double-tap detector
+    var focusedReadingVerseKey by remember(activeTrackId, backupVersion) {
+        mutableStateOf(quranPrefs.getString("focused_verse_key_$activeTrackId", null))
+    }
+    var lastTappedVerseKey by remember { mutableStateOf<String?>(null) }
+    var lastTapTimestampMs by remember { mutableLongStateOf(0L) }
 
     // Exit Full-Screen mode when user presses Back button
     BackHandler(enabled = isFullScreen) {
@@ -222,6 +243,15 @@ fun QuranReaderScreen(
 
     // Helper that silently saves the current reading stop-point automatically
     fun persistAutoStopPoint(surahName: String, ayahNumber: Int, pageNumber: Int) {
+        if (isFixedSurahWerd) {
+            val lockedStartPage = initialPage.coerceIn(1, 604)
+            bookmarkedPage = lockedStartPage
+            quranPrefs.edit()
+                .putInt("last_viewed_page_$activeTrackId", lockedStartPage)
+                .putInt("last_read_page_$activeTrackId", lockedStartPage)
+                .apply()
+            return
+        }
         bookmarkedSurah = surahName
         bookmarkedAyah = ayahNumber
         bookmarkedPage = pageNumber
@@ -511,23 +541,38 @@ fun QuranReaderScreen(
                                     )
                                 }
 
-                                // Font Size Cycle Button
+                                // Font Size Cycle Button (works in both Single-Page Mushaf Mode & Ayah-by-Ayah Mode)
                                 IconButton(
                                     onClick = {
-                                        fontScaleSp = when {
-                                            fontScaleSp < 26f -> 28f
-                                            fontScaleSp < 30f -> 31f
-                                            fontScaleSp < 33f -> 34f
+                                        fontZoomStep = (fontZoomStep + 1) % 5
+                                        fontScaleSp = when (fontZoomStep) {
+                                            0 -> 28f
+                                            1 -> 30f
+                                            2 -> 33f
+                                            3 -> 36f
                                             else -> 24f
                                         }
-                                        quranPrefs.edit().putFloat("mushaf_font_size_sp_v2", fontScaleSp).apply()
+                                        quranPrefs.edit()
+                                            .putInt("mushaf_font_zoom_step", fontZoomStep)
+                                            .putFloat("mushaf_font_size_sp_v2", fontScaleSp)
+                                            .apply()
+                                        val zoomLabel = when (fontZoomStep) {
+                                            0 -> "حجم الخط: تلقائي (صفحة كاملة)"
+                                            1 -> "حجم الخط: تكبير متوسط (+1)"
+                                            2 -> "حجم الخط: تكبير كبير (+2)"
+                                            3 -> "حجم الخط: تكبير كبير جداً (+3)"
+                                            else -> "حجم الخط: تصغير مريح"
+                                        }
+                                        Toast.makeText(context, zoomLabel, Toast.LENGTH_SHORT).show()
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("mushaf_font_size_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.FormatSize,
                                         contentDescription = "حجم الخط",
-                                        tint = GoldAccent,
+                                        tint = if (fontZoomStep == 0) GoldAccent else EmeraldGreen,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -552,12 +597,12 @@ fun QuranReaderScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Row 3: Prominent Dedicated Full-Screen Mushaf Button
+                        // Row 3: Concise Dedicated Full-Screen Mushaf Button
                         Button(
                             onClick = { onToggleFullScreen(true) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = RoyalNavyDark,
-                                contentColor = GoldAccent
+                                contentColor = EmeraldGreen
                             ),
                             border = BorderStroke(1.dp, GoldAccent),
                             shape = RoundedCornerShape(10.dp),
@@ -570,15 +615,15 @@ fun QuranReaderScreen(
                             Icon(
                                 imageVector = Icons.Default.Fullscreen,
                                 contentDescription = "ملء الشاشة",
-                                tint = GoldAccent,
+                                tint = EmeraldGreen,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "فتح المصحف في وضع ملء الشاشة (Full Screen)",
+                                text = "وضع ملء الشاشة",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = GoldAccent
+                                color = EmeraldGreen
                             )
                         }
                     }
@@ -739,6 +784,7 @@ fun QuranReaderScreen(
                         verses = versesOnThisPage,
                         isAyahByAyahMode = isAyahByAyahMode,
                         fontScaleSp = fontScaleSp,
+                        fontZoomStep = fontZoomStep,
                         pageCardColor = pageCardColor,
                         textColor = textColor,
                         secondaryTextColor = secondaryTextColor,
@@ -762,10 +808,26 @@ fun QuranReaderScreen(
                         bookmarkedSurah = bookmarkedSurah,
                         bookmarkedAyah = bookmarkedAyah,
                         memorizedAyahKeys = memorizedAyahKeys,
+                        focusedReadingVerseKey = focusedReadingVerseKey,
                         selectedVerse = floatingPopoverVerse ?: activePlayingVerse ?: selectedVerseForSheet,
                         onVerseClicked = { clickedVerse ->
-                            floatingPopoverVerse = clickedVerse
+                            val clickedKey = "${clickedVerse.surahNumber}:${clickedVerse.ayahNumber}"
+                            val nowMs = System.currentTimeMillis()
+                            focusedReadingVerseKey = clickedKey
+                            quranPrefs.edit()
+                                .putString("focused_verse_key_$activeTrackId", clickedKey)
+                                .apply()
                             persistAutoStopPoint(clickedVerse.surahNameAr, clickedVerse.ayahNumber, clickedVerse.page)
+
+                            if (lastTappedVerseKey == clickedKey && (nowMs - lastTapTimestampMs) <= 550L) {
+                                // Double tap (ضغطتان متتاليتان): Open the floating Ayah action menu
+                                floatingPopoverVerse = clickedVerse
+                                lastTapTimestampMs = 0L
+                            } else {
+                                // Single tap (ضغطة واحدة): Highlight Ayah with strong light-gray reading focus only
+                                lastTappedVerseKey = clickedKey
+                                lastTapTimestampMs = nowMs
+                            }
                         }
                     )
                 }
@@ -773,7 +835,7 @@ fun QuranReaderScreen(
         }
     }
 
-    // TRUE FLOATING POPUP CARD WHEN USER TAPS ANY AYAH (Floats over center of screen, NOT at top of page)
+    // TRUE FLOATING POPUP CARD WHEN USER DOUBLE-TAPS ANY AYAH
     floatingPopoverVerse?.let { tappedVerse ->
         val isThisVersePlaying = audioPlaybackState.isPlaying &&
                 audioPlaybackState.currentSurahNumber == tappedVerse.surahNumber &&
@@ -795,7 +857,7 @@ fun QuranReaderScreen(
                     .border(2.dp, GoldAccent, RoundedCornerShape(22.dp))
                     .testTag("floating_ayah_popover_box"),
                 shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = RoyalNavyDark),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFDF8EC)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 14.dp)
             ) {
                 Column(
@@ -821,7 +883,7 @@ fun QuranReaderScreen(
                             ) {
                                 Text(
                                     text = "سورة ${tappedVerse.surahNameAr} • الآية ${toArabicIndicDigits(tappedVerse.ayahNumber)}",
-                                    color = RoyalNavyDark,
+                                    color = Color.White,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 13.sp,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -829,12 +891,12 @@ fun QuranReaderScreen(
                             }
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = EmeraldGreen.copy(alpha = 0.25f),
+                                color = EmeraldGreen.copy(alpha = 0.14f),
                                 border = BorderStroke(0.8.dp, EmeraldGreen)
                             ) {
                                 Text(
                                     text = "صفحة ${toArabicIndicDigits(tappedVerse.page)}",
-                                    color = Color(0xFFFDF8EE),
+                                    color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -847,7 +909,7 @@ fun QuranReaderScreen(
                             modifier = Modifier
                                 .size(30.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.1f))
+                                .background(RoyalNavyDark)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -861,8 +923,8 @@ fun QuranReaderScreen(
                     // 2. Vocalized Ayah Text Preview Box
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF15263F),
-                        border = BorderStroke(1.dp, GoldBorder.copy(alpha = 0.6f)),
+                        color = Color(0xFFF3E9D2),
+                        border = BorderStroke(1.dp, GoldBorder),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -871,7 +933,7 @@ fun QuranReaderScreen(
                             fontWeight = FontWeight.Bold,
                             fontSize = 19.sp,
                             lineHeight = 31.sp,
-                            color = Color(0xFFFDF8EE),
+                            color = Color(0xFF1A110B),
                             textAlign = TextAlign.Center,
                             maxLines = 4,
                             overflow = TextOverflow.Ellipsis,
@@ -979,8 +1041,8 @@ fun QuranReaderScreen(
                                 floatingPopoverVerse = null
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isStopBookmark) GoldAccent else Color(0xFF1F3A5F),
-                                contentColor = if (isStopBookmark) RoyalNavyDark else GoldAccent
+                                containerColor = if (isStopBookmark) GoldAccent else RoyalNavyDark,
+                                contentColor = if (isStopBookmark) Color.White else GoldAccent
                             ),
                             border = BorderStroke(1.dp, GoldAccent),
                             shape = RoundedCornerShape(12.dp),
@@ -1014,8 +1076,8 @@ fun QuranReaderScreen(
                                 ).show()
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isMemorized) EmeraldGreen else Color(0xFF1F3A5F),
-                                contentColor = Color.White
+                                containerColor = if (isMemorized) EmeraldGreen else RoyalNavyDark,
+                                contentColor = if (isMemorized) Color.White else EmeraldGreen
                             ),
                             border = BorderStroke(1.dp, if (isMemorized) EmeraldGreen else GoldBorder),
                             shape = RoundedCornerShape(12.dp),
@@ -1098,8 +1160,8 @@ fun QuranReaderScreen(
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.2.dp, EmeraldGreen),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = EmeraldGreen.copy(alpha = 0.16f),
-                                contentColor = Color(0xFFFDF8EE)
+                                containerColor = EmeraldGreen.copy(alpha = 0.12f),
+                                contentColor = EmeraldGreen
                             ),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier
@@ -1110,7 +1172,7 @@ fun QuranReaderScreen(
                             Icon(
                                 imageVector = Icons.Default.Share,
                                 contentDescription = "مشاركة الآية",
-                                tint = GoldAccent,
+                                tint = EmeraldGreen,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
@@ -1138,7 +1200,7 @@ fun QuranReaderScreen(
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = GoldAccent,
-                                contentColor = RoyalNavyDark
+                                contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -1150,7 +1212,7 @@ fun QuranReaderScreen(
                                 text = "🔎 عرض التفسير الميسر للآية",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = RoyalNavyDark,
+                                color = Color.White,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -1263,7 +1325,7 @@ fun QuranReaderScreen(
                         .border(1.dp, GoldBorder, RoundedCornerShape(14.dp)),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = RoyalNavyDark.copy(alpha = 0.7f)
+                        containerColor = Color(0xFFF3E9D2)
                     )
                 ) {
                     Text(
@@ -1272,7 +1334,7 @@ fun QuranReaderScreen(
                         fontSize = 23.sp,
                         lineHeight = 40.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFDF8EE),
+                        color = Color(0xFF1A110B),
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2067,6 +2129,7 @@ private fun MushafPageContent(
     verses: List<OfflineVerse>,
     isAyahByAyahMode: Boolean,
     fontScaleSp: Float,
+    fontZoomStep: Int = 0,
     pageCardColor: Color,
     textColor: Color,
     secondaryTextColor: Color,
@@ -2078,6 +2141,7 @@ private fun MushafPageContent(
     bookmarkedSurah: String,
     bookmarkedAyah: Int,
     memorizedAyahKeys: Set<String>,
+    focusedReadingVerseKey: String? = null,
     selectedVerse: OfflineVerse?,
     onVerseClicked: (OfflineVerse) -> Unit
 ) {
@@ -2335,13 +2399,28 @@ private fun MushafPageContent(
                         chosenSp
                     }
 
-                    val effectiveLineHeightSp = autoFittedFontSp * 1.32f
+                    val zoomDeltaSp = when (fontZoomStep) {
+                        1 -> 3.5f
+                        2 -> 7.0f
+                        3 -> 11.0f
+                        4 -> -2.0f
+                        else -> 0f
+                    }
+                    val displayFontSp = (autoFittedFontSp + zoomDeltaSp).coerceIn(13f, 40f)
+                    val effectiveLineHeightSp = displayFontSp * 1.32f
+                    val isZoomScrollEnabled = fontZoomStep in 1..3
+                    val pageScrollState = rememberScrollState()
 
-                    // Single-Page Non-Scrolling Column (Fits 100% of page inside the ornate frame)
+                    // Single-Page Column (Auto-fits 100% of page when fontZoomStep == 0, or scrolls smoothly when user enlarges font via Tt)
                     Column(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (isZoomScrollEnabled) Modifier.verticalScroll(pageScrollState)
+                                else Modifier
+                            ),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                        verticalArrangement = if (isZoomScrollEnabled) Arrangement.Top else Arrangement.Center
                     ) {
                         surahGroups.forEachIndexed { gIdx, (firstV, groupVerses) ->
                             // Show Ornamental Surah Header if Ayah 1 is on this page
@@ -2352,7 +2431,7 @@ private fun MushafPageContent(
                                     isNightMode = isNightMode
                                 )
                                 if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
-                                    val basmalahAnnotated = remember(isNightMode, autoFittedFontSp) {
+                                    val basmalahAnnotated = remember(isNightMode, displayFontSp) {
                                         buildAnnotatedString {
                                             appendShamarlyColoredQuranText(
                                                 rawText = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ",
@@ -2360,7 +2439,7 @@ private fun MushafPageContent(
                                                 divineNameColor = divineNameColor,
                                                 waqfColor = waqfMarkColor,
                                                 bgHighlight = Color.Transparent,
-                                                fontSizeSp = (autoFittedFontSp - 0.5f).coerceAtLeast(14f)
+                                                fontSizeSp = (displayFontSp - 0.5f).coerceAtLeast(14f)
                                             )
                                         }
                                     }
@@ -2368,7 +2447,7 @@ private fun MushafPageContent(
                                         text = basmalahAnnotated,
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = (autoFittedFontSp - 0.5f).coerceAtLeast(14f).sp,
+                                        fontSize = (displayFontSp - 0.5f).coerceAtLeast(14f).sp,
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -2383,7 +2462,7 @@ private fun MushafPageContent(
                                         SpanStyle(
                                             color = waqfMarkColor,
                                             fontFamily = AmiriFontFamily,
-                                            fontSize = autoFittedFontSp.sp,
+                                            fontSize = displayFontSp.sp,
                                             fontWeight = FontWeight.ExtraBold
                                         )
                                     ) {
@@ -2394,12 +2473,14 @@ private fun MushafPageContent(
                                     val tagKey = "${v.surahNumber}:${v.ayahNumber}"
                                     val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
                                     val isMemorized = memorizedAyahKeys.contains(tagKey)
+                                    val isFocusedReading = (focusedReadingVerseKey == tagKey)
                                     val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
                                     val isSajdahVerse = SAJDAH_VERSE_KEYS.contains(tagKey)
 
                                     val bgHighlight = when {
+                                        isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFCFD6DF)
                                         isSelected -> GoldAccent.copy(alpha = 0.35f)
-                                        isBookmarked -> EmeraldGreen.copy(alpha = 0.25f)
+                                        isBookmarked -> EmeraldGreen.copy(alpha = 0.22f)
                                         isMemorized -> GoldAccent.copy(alpha = 0.16f)
                                         else -> Color.Transparent
                                     }
@@ -2412,7 +2493,7 @@ private fun MushafPageContent(
                                         divineNameColor = divineNameColor,
                                         waqfColor = waqfMarkColor,
                                         bgHighlight = bgHighlight,
-                                        fontSizeSp = autoFittedFontSp
+                                        fontSizeSp = displayFontSp
                                     )
 
                                     if (isSajdahVerse) {
@@ -2421,7 +2502,7 @@ private fun MushafPageContent(
                                                 color = divineNameColor,
                                                 background = bgHighlight,
                                                 fontFamily = AmiriFontFamily,
-                                                fontSize = autoFittedFontSp.sp,
+                                                fontSize = displayFontSp.sp,
                                                 fontWeight = FontWeight.ExtraBold
                                             )
                                         ) {
@@ -2439,7 +2520,7 @@ private fun MushafPageContent(
                                             },
                                             background = bgHighlight,
                                             fontFamily = AmiriFontFamily,
-                                            fontSize = (autoFittedFontSp - 1.5f).coerceAtLeast(12f).sp,
+                                            fontSize = (displayFontSp - 1.5f).coerceAtLeast(12f).sp,
                                             fontWeight = FontWeight.ExtraBold
                                         )
                                     ) {
@@ -2459,7 +2540,7 @@ private fun MushafPageContent(
                                 style = TextStyle(
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = autoFittedFontSp.sp,
+                                    fontSize = displayFontSp.sp,
                                     lineHeight = effectiveLineHeightSp.sp,
                                     textAlign = TextAlign.Justify,
                                     textDirection = TextDirection.Rtl
@@ -2498,6 +2579,7 @@ private fun MushafPageContent(
                         val tagKey = "${v.surahNumber}:${v.ayahNumber}"
                         val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
                         val isMemorized = memorizedAyahKeys.contains(tagKey)
+                        val isFocusedReading = (focusedReadingVerseKey == tagKey)
                         val isSajdahVerse = SAJDAH_VERSE_KEYS.contains(tagKey)
 
                         Card(
@@ -2506,8 +2588,9 @@ private fun MushafPageContent(
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onVerseClicked(v) }
                                 .border(
-                                    width = if (isBookmarked || isMemorized) 1.5.dp else 0.6.dp,
+                                    width = if (isFocusedReading || isBookmarked || isMemorized) 1.6.dp else 0.6.dp,
                                     color = when {
+                                        isFocusedReading -> if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
                                         isBookmarked -> EmeraldGreen
                                         isMemorized -> GoldAccent
                                         else -> GoldBorder
@@ -2515,8 +2598,11 @@ private fun MushafPageContent(
                                     shape = RoundedCornerShape(12.dp)
                                 ),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isNightMode) Color(0xFF162A3F).copy(alpha = 0.55f)
-                                else Color(0xFFF6EFE0).copy(alpha = 0.72f)
+                                containerColor = when {
+                                    isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFCFD6DF)
+                                    isNightMode -> Color(0xFF162A3F).copy(alpha = 0.55f)
+                                    else -> Color(0xFFF6EFE0).copy(alpha = 0.72f)
+                                }
                             )
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {

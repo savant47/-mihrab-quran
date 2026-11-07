@@ -124,6 +124,10 @@ fun AppNavigation(
             onDismissPostLogReflectionDialog = { khatmaViewModel.dismissPostLogReflectionDialog() },
             onSelectTrack = { trackId -> khatmaViewModel.selectTrack(trackId) },
             onCreateTrack = { name -> khatmaViewModel.createNewTrack(name) },
+            onCreateFixedSurahTrack = { name, surahName, startPage ->
+                khatmaViewModel.createNewFixedSurahTrack(name, surahName, startPage)
+            },
+            onDeleteTrack = { id -> khatmaViewModel.deleteTrack(id) },
             onRenameTrack = { id, name -> khatmaViewModel.renameTrack(id, name) },
             onAutoSaveStopPoint = { surah, ayah, page ->
                 khatmaViewModel.autoSaveStopPointSilently(surah, ayah, page)

@@ -124,7 +124,7 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
                 val currentSuccess = _uiState.value as? KhatmaUiState.Success
                 val reflectionText = currentSuccess?.latestReflection ?: "مرحباً بك في محرابي (إعداد آسر الشربيني). وِردُكَ.. خلوتُكَ.. ومحرابُك. أدخل وردك اليومي للبدء بالتدبر والدعاء."
 
-                if (activeTrack.currentPage >= 604 || activeTrack.isCompleted) {
+                if (!activeTrack.isFixedSurahWerd && (activeTrack.currentPage >= 604 || activeTrack.isCompleted)) {
                     _showCompletionDialog.value = true
                 }
 
@@ -183,6 +183,31 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
                 selectTrack(newId)
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating new track", e)
+            }
+        }
+    }
+
+    fun createNewFixedSurahTrack(trackName: String, surahName: String, startPage: Int) {
+        viewModelScope.launch {
+            try {
+                val newId = repository.createFixedSurahTrack(trackName, surahName, startPage)
+                selectTrack(newId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating fixed surah track", e)
+            }
+        }
+    }
+
+    fun deleteTrack(trackId: String) {
+        if (trackId == "main") return
+        viewModelScope.launch {
+            try {
+                repository.deleteKhatmaTrack(trackId)
+                if (_selectedTrackId.value == trackId) {
+                    selectTrack("main")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting track", e)
             }
         }
     }
@@ -268,6 +293,10 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         val currentState = _uiState.value as? KhatmaUiState.Success
         val activeTrack = currentState?.activeTrack ?: defaultTrack
+        if (activeTrack.isFixedSurahWerd) {
+            // Fixed Surah Werd (e.g. سورة الكهف) always stays anchored to its Surah start page
+            return
+        }
         val clampedPage = page.coerceIn(1, 604)
 
         val updatedTrack = activeTrack.copy(

@@ -41,6 +41,9 @@ class LocalKhatmaStorage private constructor(context: Context) {
     private val _spiritualMessagesFlow = MutableStateFlow(loadSpiritualMessages())
     val spiritualMessagesFlow: StateFlow<List<SpiritualMessageItem>> = _spiritualMessagesFlow.asStateFlow()
 
+    private val _cumulativeAdhkarTasbeehFlow = MutableStateFlow(loadInitialCumulativeAdhkarTasbeeh(context.applicationContext))
+    val cumulativeAdhkarTasbeehFlow: StateFlow<Long> = _cumulativeAdhkarTasbeehFlow.asStateFlow()
+
     private val _backupRestoreVersionFlow = MutableStateFlow(0)
     val backupRestoreVersionFlow: StateFlow<Int> = _backupRestoreVersionFlow.asStateFlow()
 
@@ -51,6 +54,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
         private const val KEY_READING_LOGS = "reading_logs_json_array"
         private const val KEY_SPIRITUAL_MESSAGES = "spiritual_messages_json_array"
         private const val KEY_SPIRITUAL_ROTATION_INDEX = "spiritual_rotation_index"
+        private const val KEY_CUMULATIVE_ADHKAR_TASBEEH = "cumulative_all_time_adhkar_tasbeeh_count"
 
         @Volatile
         private var instance: LocalKhatmaStorage? = null
@@ -63,6 +67,40 @@ class LocalKhatmaStorage private constructor(context: Context) {
                 instance ?: LocalKhatmaStorage(context).also { instance = it }
             }
         }
+    }
+
+    private fun loadInitialCumulativeAdhkarTasbeeh(appContext: Context): Long {
+        if (prefs.contains(KEY_CUMULATIVE_ADHKAR_TASBEEH)) {
+            return prefs.getLong(KEY_CUMULATIVE_ADHKAR_TASBEEH, 0L).coerceAtLeast(0L)
+        }
+        // Seed initial all-time count from any existing tasbeeh or adhkar counts on device
+        var initialSum = 0L
+        try {
+            val tasbeehPrefs = appContext.getSharedPreferences("tasbeeh_prefs", Context.MODE_PRIVATE)
+            for ((_, v) in tasbeehPrefs.all) {
+                if (v is Int && v > 0) initialSum += v.toLong()
+            }
+            val adhkarPrefs = appContext.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE)
+            for ((k, v) in adhkarPrefs.all) {
+                if (k != "last_daily_reset_date" && v is Int && v > 0) {
+                    initialSum += v.toLong()
+                }
+            }
+        } catch (_: Exception) {
+        }
+        prefs.edit().putLong(KEY_CUMULATIVE_ADHKAR_TASBEEH, initialSum).apply()
+        return initialSum
+    }
+
+    /**
+     * Increments the all-time cumulative Adhkar & Tasbeeh counter.
+     * Never decreases when daily or session counters are reset.
+     */
+    fun incrementCumulativeAdhkarTasbeeh(delta: Int = 1) {
+        if (delta <= 0) return
+        val next = (_cumulativeAdhkarTasbeehFlow.value + delta.toLong()).coerceAtLeast(0L)
+        prefs.edit().putLong(KEY_CUMULATIVE_ADHKAR_TASBEEH, next).apply()
+        _cumulativeAdhkarTasbeehFlow.value = next
     }
 
     /**
@@ -222,17 +260,52 @@ class LocalKhatmaStorage private constructor(context: Context) {
                 val list = mutableListOf<KhatmaTrack>()
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
+                    val trackId = obj.optString("trackId", "main")
+                    val trackName = obj.optString("trackName", "الختمة الرئيسية")
+                    var isFixedSurah = obj.optBoolean("isFixedSurahWerd", false)
+                    var fixedSurahName = obj.optString("fixedSurahName", "")
+                    var fixedSurahStartPage = obj.optInt("fixedSurahStartPage", 1)
+
+                    // Automatically upgrade custom tracks named after a specific Surah (e.g. "ورد الكهف", "سورة الكهف", "ورد الملك")
+                    if (trackId != "main" && !isFixedSurah && !obj.has("isFixedSurahWerd")) {
+                        val matchedSurah = QuranDataHelper.surahs
+                            .sortedByDescending { it.nameArabic.length }
+                            .firstOrNull { surah ->
+                                surah.nameArabic.length >= 2 && trackName.contains(surah.nameArabic)
+                            }
+                        if (matchedSurah != null) {
+                            isFixedSurah = true
+                            fixedSurahName = matchedSurah.nameArabic
+                            fixedSurahStartPage = matchedSurah.startPage
+                        }
+                    }
+
+                    val effectiveSurah = if (isFixedSurah && fixedSurahName.isNotBlank()) {
+                        fixedSurahName
+                    } else {
+                        obj.optString("currentSurah", "الفاتحة")
+                    }
+                    val effectivePage = if (isFixedSurah && fixedSurahStartPage in 1..604) {
+                        fixedSurahStartPage
+                    } else {
+                        obj.optInt("currentPage", 1)
+                    }
+                    val effectiveAyah = if (isFixedSurah) 1 else obj.optInt("currentAyah", 1)
+
                     list.add(
                         KhatmaTrack(
-                            trackId = obj.optString("trackId", "main"),
-                            trackName = obj.optString("trackName", "الختمة الرئيسية"),
+                            trackId = trackId,
+                            trackName = trackName,
                             khatmaNumber = obj.optInt("khatmaNumber", 1),
-                            currentSurah = obj.optString("currentSurah", "الفاتحة"),
-                            currentAyah = obj.optInt("currentAyah", 1),
-                            currentPage = obj.optInt("currentPage", 1),
-                            completedRubCount = obj.optInt("completedRubCount", 0),
-                            progressPercentage = obj.optDouble("progressPercentage", 0.0),
-                            isCompleted = obj.optBoolean("isCompleted", false)
+                            currentSurah = effectiveSurah,
+                            currentAyah = effectiveAyah,
+                            currentPage = effectivePage,
+                            completedRubCount = if (isFixedSurah) 0 else obj.optInt("completedRubCount", 0),
+                            progressPercentage = if (isFixedSurah) 0.0 else obj.optDouble("progressPercentage", 0.0),
+                            isCompleted = if (isFixedSurah) false else obj.optBoolean("isCompleted", false),
+                            isFixedSurahWerd = isFixedSurah,
+                            fixedSurahName = fixedSurahName,
+                            fixedSurahStartPage = fixedSurahStartPage
                         )
                     )
                 }
@@ -269,6 +342,9 @@ class LocalKhatmaStorage private constructor(context: Context) {
                     put("completedRubCount", track.completedRubCount)
                     put("progressPercentage", track.progressPercentage)
                     put("isCompleted", track.isCompleted)
+                    put("isFixedSurahWerd", track.isFixedSurahWerd)
+                    put("fixedSurahName", track.fixedSurahName)
+                    put("fixedSurahStartPage", track.fixedSurahStartPage)
                 }
                 arr.put(obj)
             }
@@ -361,22 +437,26 @@ class LocalKhatmaStorage private constructor(context: Context) {
             // ignore
         }
 
-        // Also update the active track in local storage
+        // Also update the active track in local storage (unless it is a Fixed Surah Werd)
         val currentTracks = loadTracks().toMutableList()
         val activeIndex = currentTracks.indexOfFirst { it.trackId == trackId }
         val rubCount = QuranDataHelper.pageToRub(page)
         val progressPercentage = (page.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
 
         if (activeIndex >= 0) {
-            val updated = currentTracks[activeIndex].copy(
-                currentSurah = surah,
-                currentAyah = ayah,
-                currentPage = page,
-                completedRubCount = rubCount,
-                progressPercentage = progressPercentage,
-                isCompleted = page >= QuranDataHelper.TOTAL_PAGES
-            )
-            currentTracks[activeIndex] = updated
+            val existing = currentTracks[activeIndex]
+            if (!existing.isFixedSurahWerd) {
+                val updated = existing.copy(
+                    currentSurah = surah,
+                    currentAyah = ayah,
+                    currentPage = page,
+                    completedRubCount = rubCount,
+                    progressPercentage = progressPercentage,
+                    isCompleted = page >= QuranDataHelper.TOTAL_PAGES
+                )
+                currentTracks[activeIndex] = updated
+                saveTracks(currentTracks)
+            }
         } else {
             currentTracks.add(
                 KhatmaTrack(
@@ -389,25 +469,29 @@ class LocalKhatmaStorage private constructor(context: Context) {
                     progressPercentage = progressPercentage
                 )
             )
+            saveTracks(currentTracks)
         }
-        saveTracks(currentTracks)
 
-        // Update user profile as well
-        val currentUser = loadGuestUser()
-        saveGuestUser(
-            currentUser.copy(
-                currentSurah = surah,
-                currentAyah = ayah,
-                currentPage = page,
-                completedRubCount = rubCount,
-                progressPercentage = progressPercentage
+        // Update user profile as well if not a fixed surah werd
+        val isFixed = activeIndex >= 0 && currentTracks[activeIndex].isFixedSurahWerd
+        if (!isFixed) {
+            val currentUser = loadGuestUser()
+            saveGuestUser(
+                currentUser.copy(
+                    currentSurah = surah,
+                    currentAyah = ayah,
+                    currentPage = page,
+                    completedRubCount = rubCount,
+                    progressPercentage = progressPercentage
+                )
             )
-        )
+        }
     }
 
     /**
      * Silently updates the stop-point (Surah, Ayah, Page) of a track when the user flips pages
      * or exits the Mushaf without pressing the manual Save button.
+     * Note: Fixed Surah Werds (e.g., سورة الكهف) keep their starting page fixed.
      */
     fun updateTrackCheckpointSilently(
         trackId: String,
@@ -422,7 +506,12 @@ class LocalKhatmaStorage private constructor(context: Context) {
         val currentTracks = loadTracks().toMutableList()
         val activeIndex = currentTracks.indexOfFirst { it.trackId == trackId }
         if (activeIndex >= 0) {
-            currentTracks[activeIndex] = currentTracks[activeIndex].copy(
+            val existing = currentTracks[activeIndex]
+            if (existing.isFixedSurahWerd) {
+                // Keep Fixed Surah Werd anchored to its starting Surah & Page
+                return
+            }
+            currentTracks[activeIndex] = existing.copy(
                 currentSurah = surah,
                 currentAyah = ayah,
                 currentPage = clampedPage,
@@ -603,6 +692,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
             val loadedLogs = loadReadingLogs()
             _readingLogsFlow.value = loadedLogs
             _spiritualMessagesFlow.value = loadSpiritualMessages()
+            _cumulativeAdhkarTasbeehFlow.value = loadInitialCumulativeAdhkarTasbeeh(appCtx)
             _backupRestoreVersionFlow.value += 1
 
             val mainTrack = loadedTracks.firstOrNull()
