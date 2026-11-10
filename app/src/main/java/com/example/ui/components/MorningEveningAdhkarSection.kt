@@ -2,11 +2,14 @@ package com.example.ui.components
 
 import android.content.Context
 import android.media.MediaPlayer
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,10 +31,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -77,7 +84,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.audio.QuranAudioPlayerManager
+import com.example.data.local.AdhkarCustomizationManager
 import com.example.data.local.LocalKhatmaStorage
+import com.example.data.local.UnifiedDhikrItem
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
@@ -398,6 +407,9 @@ fun ensureDailyAdhkarResetIfNewDay(prefs: android.content.SharedPreferences): Bo
         if (lastResetDate != null) {
             AuthenticAdhkarData.morningAdhkar.forEach { editor.putInt(it.id, 0) }
             AuthenticAdhkarData.eveningAdhkar.forEach { editor.putInt(it.id, 0) }
+            prefs.all.keys
+                .filter { it.startsWith("custom_morning_") || it.startsWith("custom_evening_") }
+                .forEach { editor.putInt(it, 0) }
         }
         editor.putString(KEY_LAST_DAILY_ADHKAR_RESET_DATE, todayKey)
         editor.apply()
@@ -411,10 +423,50 @@ data class HisnDhikrItem(
     val title: String,
     val arabicText: String,
     val benefit: String,
-    val targetCount: Int
+    val targetCount: Int,
+    val isCustomAdded: Boolean = false
 )
 
 object AuthenticAdhkarData {
+
+    fun getEffectiveItems(context: Context, trackType: String): List<HisnDhikrItem> {
+        val baseList = if (trackType == "morning") morningAdhkar else eveningAdhkar
+        val overrides = AdhkarCustomizationManager.getOverridesMap(context)
+        val deletedKeys = AdhkarCustomizationManager.getDeletedKeys(context)
+        val customAdded = AdhkarCustomizationManager.getCustomAddedAdhkar(context, scopeFilter = trackType)
+
+        val customMapped = customAdded
+            .filter { !deletedKeys.contains(it.uniqueKey) }
+            .map { c ->
+                val ov = overrides[c.uniqueKey]
+                HisnDhikrItem(
+                    id = c.uniqueKey,
+                    title = ov?.title?.ifBlank { c.title } ?: c.title,
+                    arabicText = ov?.arabicText?.ifBlank { c.arabicText } ?: c.arabicText,
+                    benefit = ov?.benefit ?: c.benefit,
+                    targetCount = ov?.targetCount ?: c.targetCount,
+                    isCustomAdded = true
+                )
+            }
+
+        val builtInMapped = baseList
+            .filter { !deletedKeys.contains(it.id) }
+            .map { item ->
+                val ov = overrides[item.id]
+                if (ov != null) {
+                    item.copy(
+                        title = ov.title.ifBlank { item.title },
+                        arabicText = ov.arabicText.ifBlank { item.arabicText },
+                        benefit = ov.benefit.ifBlank { item.benefit },
+                        targetCount = ov.targetCount.coerceAtLeast(1)
+                    )
+                } else {
+                    item
+                }
+            }
+
+        return customMapped + builtInMapped
+    }
 
     val morningAdhkar: List<HisnDhikrItem> = listOf(
         HisnDhikrItem(
@@ -653,6 +705,7 @@ fun MorningEveningAdhkarBox() {
     val backupVersion by remember {
         LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
     }.collectAsState()
+    val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
 
     val audioState by AdhkarAudioPlayerManager.state.collectAsState()
 
@@ -666,6 +719,8 @@ fun MorningEveningAdhkarBox() {
     var activeDialogType by remember { mutableStateOf<String?>(null) } // "morning" or "evening"
     var showHisnCompleteDialog by remember { mutableStateOf(false) }
     var initialHisnGroupKey by remember { mutableStateOf(HisnSectionGroup.ALL.key) }
+    var initialHisnChapterId by remember { mutableStateOf<Int?>(null) }
+    var showFavoriteAdhkarDialog by remember { mutableStateOf(false) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
     // Automatic Daily Reset at 12:00 AM midnight (checks on launch and every 20 seconds while open)
@@ -681,15 +736,25 @@ fun MorningEveningAdhkarBox() {
         }
     }
 
-    val morningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
+    val effectiveMorningItems = remember(refreshTrigger, activeDialogType, backupVersion, customizationVersion) {
+        AuthenticAdhkarData.getEffectiveItems(context, "morning")
+    }
+    val effectiveEveningItems = remember(refreshTrigger, activeDialogType, backupVersion, customizationVersion) {
+        AuthenticAdhkarData.getEffectiveItems(context, "evening")
+    }
+    val totalFavoritesCount = remember(refreshTrigger, backupVersion, customizationVersion) {
+        AdhkarCustomizationManager.getTotalFavoritesCount(context)
+    }
+
+    val morningCompleted = remember(refreshTrigger, activeDialogType, backupVersion, effectiveMorningItems) {
         ensureDailyAdhkarResetIfNewDay(prefs)
-        AuthenticAdhkarData.morningAdhkar.count { item ->
+        effectiveMorningItems.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
     }
-    val eveningCompleted = remember(refreshTrigger, activeDialogType, backupVersion) {
+    val eveningCompleted = remember(refreshTrigger, activeDialogType, backupVersion, effectiveEveningItems) {
         ensureDailyAdhkarResetIfNewDay(prefs)
-        AuthenticAdhkarData.eveningAdhkar.count { item ->
+        effectiveEveningItems.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
     }
@@ -737,7 +802,7 @@ fun MorningEveningAdhkarBox() {
                         color = EmeraldGreen
                     )
                     Text(
-                        text = "تصفير تلقائي يومياً 12:00 ص • قراءة واستماع هادئ وفهرس حصن المسلم",
+                        text = "تصفير تلقائي يومياً 12:00 ص • المفضلة وتعديل التكرار بضغطة طويلة",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                         fontSize = 11.sp
@@ -791,7 +856,7 @@ fun MorningEveningAdhkarBox() {
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "إنجاز $morningCompleted / ${AuthenticAdhkarData.morningAdhkar.size}",
+                                text = "إنجاز $morningCompleted / ${effectiveMorningItems.size}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -879,7 +944,7 @@ fun MorningEveningAdhkarBox() {
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "إنجاز $eveningCompleted / ${AuthenticAdhkarData.eveningAdhkar.size}",
+                                text = "إنجاز $eveningCompleted / ${effectiveEveningItems.size}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.92f)
@@ -942,7 +1007,7 @@ fun MorningEveningAdhkarBox() {
             androidx.compose.material3.HorizontalDivider(color = GoldBorder.copy(alpha = 0.45f))
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search) — Unified Light Mushaf Theme
+            // Complete Offline Hisn Al-Muslim Section (132 Chapters + Instant Search + External Favorites Button)
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFFF3E9D2),
@@ -969,10 +1034,42 @@ fun MorningEveningAdhkarBox() {
                                 color = EmeraldGreen
                             )
                             Text(
-                                text = "جميع الأبواب والأدعية أوفلاين مع البحث الفوري",
+                                text = "جميع الأبواب والأدعية أوفلاين مع البحث والمفضلة",
                                 fontSize = 11.sp,
                                 color = Color(0xFF1A110B).copy(alpha = 0.78f)
                             )
+                        }
+
+                        // Heart Icon Badge on the top-left of Hisn Al-Muslim Card (marked in Screenshot 3)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFDF8EC),
+                            border = BorderStroke(1.dp, FavoriteHeartCrimson),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { showFavoriteAdhkarDialog = true }
+                                .testTag("hisn_card_top_favorite_badge")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = "الأذكار المفضلة",
+                                    tint = FavoriteHeartCrimson,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                if (totalFavoritesCount > 0) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "$totalFavoritesCount",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = FavoriteHeartCrimson
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -990,6 +1087,7 @@ fun MorningEveningAdhkarBox() {
                                 border = BorderStroke(1.dp, GoldBorder),
                                 modifier = Modifier.clickable {
                                     initialHisnGroupKey = group.key
+                                    initialHisnChapterId = null
                                     showHisnCompleteDialog = true
                                 }
                             ) {
@@ -1004,9 +1102,11 @@ fun MorningEveningAdhkarBox() {
                         }
                     }
 
+                    // 1. Primary Button: Open Complete Hisn Al-Muslim Index & Search
                     Button(
                         onClick = {
                             initialHisnGroupKey = HisnSectionGroup.ALL.key
+                            initialHisnChapterId = null
                             showHisnCompleteDialog = true
                         },
                         modifier = Modifier
@@ -1028,6 +1128,39 @@ fun MorningEveningAdhkarBox() {
                             maxLines = 1
                         )
                     }
+
+                    // 2. External Favorites Button directly below the Hisn Al-Muslim Index button (as requested)
+                    Button(
+                        onClick = { showFavoriteAdhkarDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("open_favorite_adhkar_external_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFDF8EC),
+                            contentColor = FavoriteHeartCrimson
+                        ),
+                        border = BorderStroke(1.3.dp, FavoriteHeartCrimson)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Favorite,
+                            contentDescription = "الأذكار المفضلة",
+                            tint = FavoriteHeartCrimson,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (totalFavoritesCount > 0)
+                                "الأذكار والأدعية المفضلة ($totalFavoritesCount)"
+                            else
+                                "الأذكار والأدعية المفضلة وإضافة ذكر يدوي",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = FavoriteHeartCrimson,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -1036,9 +1169,26 @@ fun MorningEveningAdhkarBox() {
     if (showHisnCompleteDialog) {
         HisnAlMuslimCompleteDialog(
             initialGroupKey = initialHisnGroupKey,
+            initialChapterId = initialHisnChapterId,
             onDismiss = {
                 refreshTrigger++
+                initialHisnChapterId = null
                 showHisnCompleteDialog = false
+            }
+        )
+    }
+
+    if (showFavoriteAdhkarDialog) {
+        FavoriteAdhkarDialog(
+            onOpenHisnChapter = { chapter ->
+                showFavoriteAdhkarDialog = false
+                initialHisnGroupKey = HisnSectionGroup.ALL.key
+                initialHisnChapterId = chapter.id
+                showHisnCompleteDialog = true
+            },
+            onDismiss = {
+                refreshTrigger++
+                showFavoriteAdhkarDialog = false
             }
         )
     }
@@ -1050,8 +1200,8 @@ fun MorningEveningAdhkarBox() {
             alarmTargetId = if (isMorning) "adhkar_morning" else "adhkar_evening",
             defaultAlarmHour = if (isMorning) 6 else 17,
             title = if (isMorning) "أذكار الصباح المباركة" else "أذكار المساء المباركة",
-            subtitle = if (isMorning) "حفظ وبركة وتحصين ليومك • تصفير تلقائي 12:00 ص" else "سكينة وطمأنينة وحفظ لليلتك • تصفير تلقائي 12:00 ص",
-            items = if (isMorning) AuthenticAdhkarData.morningAdhkar else AuthenticAdhkarData.eveningAdhkar,
+            subtitle = if (isMorning) "حفظ وبركة وتحصين ليومك • اضغط مطولاً لتعديل أي ذكر أو تكراره" else "سكينة وطمأنينة وحفظ لليلتك • اضغط مطولاً لتعديل أي ذكر أو تكراره",
+            items = if (isMorning) effectiveMorningItems else effectiveEveningItems,
             onDismiss = {
                 refreshTrigger++
                 activeDialogType = null
@@ -1060,6 +1210,7 @@ fun MorningEveningAdhkarBox() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AdhkarReaderDialog(
     trackType: String,
@@ -1075,7 +1226,15 @@ private fun AdhkarReaderDialog(
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val audioState by AdhkarAudioPlayerManager.state.collectAsState()
+    val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
     val isThisTrackPlaying = audioState.activeTrack == trackType && audioState.isPlaying
+
+    val favoriteItemKeys = remember(customizationVersion) {
+        AdhkarCustomizationManager.getFavoriteItems(context).map { it.uniqueKey }.toSet()
+    }
+
+    var showAddDhikrDialog by remember { mutableStateOf(false) }
+    var editingItem by remember { mutableStateOf<HisnDhikrItem?>(null) }
 
     val counts = remember(items) {
         ensureDailyAdhkarResetIfNewDay(prefs)
@@ -1108,7 +1267,7 @@ private fun AdhkarReaderDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1131,7 +1290,27 @@ private fun AdhkarReaderDialog(
                                 )
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Add Custom Dhikr to Morning/Evening
+                                IconButton(
+                                    onClick = { showAddDhikrDialog = true },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFDF8EC))
+                                        .border(1.dp, EmeraldGreen, CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "إضافة ذكر",
+                                        tint = EmeraldGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
                                 AlarmTriggerChip(
                                     targetId = alarmTargetId,
                                     defaultTitle = "منبه $title",
@@ -1140,8 +1319,6 @@ private fun AdhkarReaderDialog(
                                     defaultMinute = 0,
                                     compact = true
                                 )
-
-                                Spacer(modifier = Modifier.width(6.dp))
 
                                 OutlinedButton(
                                     onClick = {
@@ -1153,21 +1330,22 @@ private fun AdhkarReaderDialog(
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     border = BorderStroke(1.dp, GoldAccent),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = "تصفير الأذكار",
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
                                     Text("تصفير", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                IconButton(onClick = onDismiss) {
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.size(34.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "إغلاق",
@@ -1177,9 +1355,9 @@ private fun AdhkarReaderDialog(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                        // Audio Play Button inside the Dialog Header as well
+                        // Audio Play Button inside the Dialog Header
                         Button(
                             onClick = { AdhkarAudioPlayerManager.togglePlay(context, trackType) },
                             modifier = Modifier
@@ -1217,7 +1395,7 @@ private fun AdhkarReaderDialog(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1260,20 +1438,27 @@ private fun AdhkarReaderDialog(
                     items(items, key = { it.id }) { item ->
                         val currentCount = counts[item.id] ?: 0
                         val isDone = currentCount >= item.targetCount
+                        val isFav = favoriteItemKeys.contains(item.id)
 
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(18.dp))
-                                .clickable {
-                                    if (currentCount < item.targetCount) {
-                                        val next = currentCount + 1
-                                        counts[item.id] = next
-                                        prefs.edit().putInt(item.id, next).apply()
-                                        localStorage.incrementCumulativeAdhkarTasbeeh(1)
+                                .combinedClickable(
+                                    onClick = {
+                                        if (currentCount < item.targetCount) {
+                                            val next = currentCount + 1
+                                            counts[item.id] = next
+                                            prefs.edit().putInt(item.id, next).apply()
+                                            localStorage.incrementCumulativeAdhkarTasbeeh(1)
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        }
+                                    },
+                                    onLongClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        editingItem = item
                                     }
-                                }
+                                )
                                 .border(
                                     width = if (isDone) 1.5.dp else 1.dp,
                                     color = if (isDone) EmeraldGreen else GoldBorder,
@@ -1292,7 +1477,7 @@ private fun AdhkarReaderDialog(
                                     .fillMaxWidth()
                                     .padding(16.dp)
                             ) {
-                                // Title + Target Badge
+                                // Title + Heart Favorite Icon + Edit Chip + Target Badge
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1302,34 +1487,101 @@ private fun AdhkarReaderDialog(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.weight(1f)
                                     ) {
+                                        IconButton(
+                                            onClick = {
+                                                val unified = UnifiedDhikrItem(
+                                                    uniqueKey = item.id,
+                                                    scopeKey = trackType,
+                                                    title = item.title,
+                                                    categoryTitle = title,
+                                                    arabicText = item.arabicText,
+                                                    benefit = item.benefit,
+                                                    targetCount = item.targetCount,
+                                                    isCustomAdded = item.isCustomAdded
+                                                )
+                                                val added = AdhkarCustomizationManager.toggleDhikrFavorite(context, unified)
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                Toast.makeText(
+                                                    context,
+                                                    if (added) "تمت إضافة «${item.title}» إلى المفضلة ❤️"
+                                                    else "تمت إزالة الذكر من المفضلة",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                contentDescription = "إضافة للمفضلة",
+                                                tint = if (isFav) FavoriteHeartCrimson else GoldAccent,
+                                                modifier = Modifier.size(21.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(4.dp))
+
                                         if (isDone) {
                                             Icon(
                                                 imageVector = Icons.Default.CheckCircle,
                                                 contentDescription = null,
                                                 tint = EmeraldGreen,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(19.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(5.dp))
                                         }
                                         Text(
                                             text = item.title,
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isDone) EmeraldGreen else GoldAccent
+                                            color = if (isDone) EmeraldGreen else GoldAccent,
+                                            modifier = Modifier.weight(1f)
                                         )
                                     }
 
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isDone) EmeraldGreen else RoyalNavyDark
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(
-                                            text = if (item.targetCount == 1) "مرة واحدة" else "${item.targetCount} مرات",
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            color = if (isDone) Color.White else EmeraldGreen,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFFEBE1C9),
+                                            border = BorderStroke(0.8.dp, GoldBorder),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { editingItem = item }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Edit,
+                                                    contentDescription = "تعديل الذكر والتكرار",
+                                                    tint = GoldAccent,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(
+                                                    text = "تعديل",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF1A110B)
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isDone) EmeraldGreen else RoyalNavyDark
+                                        ) {
+                                            Text(
+                                                text = formatRepeatCountArabic(item.targetCount),
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                color = if (isDone) Color.White else EmeraldGreen,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
 
@@ -1347,15 +1599,15 @@ private fun AdhkarReaderDialog(
                                     modifier = Modifier.fillMaxWidth()
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Benefit / Fadl
-                                Text(
-                                    text = "الفضل: ${item.benefit}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    fontSize = 11.5.sp
-                                )
+                                if (item.benefit.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "الفضل: ${item.benefit}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        fontSize = 11.5.sp
+                                    )
+                                }
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -1381,13 +1633,17 @@ private fun AdhkarReaderDialog(
                                         ),
                                         border = BorderStroke(1.dp, if (isDone) EmeraldGreen else GoldBorder),
                                         shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1f)
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .defaultMinSize(minHeight = 46.dp)
                                     ) {
                                         Text(
                                             text = if (isDone) "تمت القراءة بحمد الله ✓ ($currentCount/${item.targetCount})"
                                             else "اضغط للعد ($currentCount / ${item.targetCount})",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
+                                            fontSize = 13.sp,
+                                            maxLines = 1
                                         )
                                     }
 
@@ -1415,5 +1671,28 @@ private fun AdhkarReaderDialog(
                 }
             }
         }
+    }
+
+    if (showAddDhikrDialog) {
+        AddOrEditDhikrDialog(
+            isEditMode = false,
+            scopeKey = trackType,
+            categoryTitle = title,
+            onDismiss = { showAddDhikrDialog = false }
+        )
+    }
+
+    editingItem?.let { target ->
+        AddOrEditDhikrDialog(
+            isEditMode = true,
+            scopeKey = trackType,
+            categoryTitle = title,
+            initialUniqueKey = target.id,
+            initialTitle = target.title,
+            initialArabicText = target.arabicText,
+            initialBenefit = target.benefit,
+            initialTargetCount = target.targetCount,
+            onDismiss = { editingItem = null }
+        )
     }
 }

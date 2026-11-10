@@ -6,9 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,12 +33,15 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.QuranTextMatcher
+import com.example.data.local.AdhkarCustomizationManager
 import com.example.data.local.LocalKhatmaStorage
+import com.example.data.local.UnifiedDhikrItem
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
@@ -53,7 +58,9 @@ data class HisnDuaEntry(
     val categoryTitle: String,
     val arabicText: String,
     val normalizedText: String,
-    val targetCount: Int
+    val targetCount: Int,
+    val benefit: String = "",
+    val isCustomAdded: Boolean = false
 )
 
 data class HisnCategoryChapter(
@@ -88,6 +95,62 @@ object HisnAlMuslimRepository {
             val loaded = loadFromAssets(context.applicationContext)
             cachedChapters = loaded
             return loaded
+        }
+    }
+
+    /**
+     * Returns all 132 chapters with user customizations applied:
+     * - Long-press text & repeat-count overrides
+     * - Deleted built-in adhkar filtered out
+     * - Custom manually added adhkar for each chapter included
+     */
+    fun getEffectiveChapters(context: Context): List<HisnCategoryChapter> {
+        val baseChapters = getChapters(context)
+        val overrides = AdhkarCustomizationManager.getOverridesMap(context)
+        val deletedKeys = AdhkarCustomizationManager.getDeletedKeys(context)
+        val allCustomAdded = AdhkarCustomizationManager.getCustomAddedAdhkar(context)
+
+        return baseChapters.map { ch ->
+            val scopeKey = "hisn_ch_${ch.id}"
+            val chapterCustomDuas = allCustomAdded
+                .filter { it.scopeKey == scopeKey && !deletedKeys.contains(it.uniqueKey) }
+                .mapIndexed { idx, custom ->
+                    val ov = overrides[custom.uniqueKey]
+                    val finalText = ov?.arabicText?.ifBlank { custom.arabicText } ?: custom.arabicText
+                    HisnDuaEntry(
+                        uniqueKey = custom.uniqueKey,
+                        idInChapter = idx + 1,
+                        categoryId = ch.id,
+                        categoryTitle = ch.title,
+                        arabicText = finalText,
+                        normalizedText = QuranTextMatcher.normalizeArabic(finalText),
+                        targetCount = ov?.targetCount ?: custom.targetCount,
+                        benefit = ov?.benefit ?: custom.benefit,
+                        isCustomAdded = true
+                    )
+                }
+
+            val modifiedBuiltIn = ch.duas
+                .filter { !deletedKeys.contains(it.uniqueKey) }
+                .map { dua ->
+                    val ov = overrides[dua.uniqueKey]
+                    if (ov != null) {
+                        val newText = ov.arabicText.ifBlank { dua.arabicText }
+                        dua.copy(
+                            arabicText = newText,
+                            normalizedText = QuranTextMatcher.normalizeArabic(newText),
+                            targetCount = ov.targetCount.coerceAtLeast(1),
+                            benefit = ov.benefit
+                        )
+                    } else {
+                        dua
+                    }
+                }
+
+            val combined = (chapterCustomDuas + modifiedBuiltIn).mapIndexed { index, entry ->
+                entry.copy(idInChapter = index + 1)
+            }
+            ch.copy(duas = combined)
         }
     }
 
@@ -172,27 +235,45 @@ object HisnAlMuslimRepository {
 }
 
 /**
- * Full-screen Offline Hisn Al-Muslim Encyclopedia Dialog (132 Chapters, 267 Authentic Duas)
- * styled after the classic parchment index (`الفهرس`) of hisnmuslim.com/i/ar/1 with instant search,
- * thematic section tabs, interactive counters, copy, and share.
+ * Full-screen Offline Hisn Al-Muslim Encyclopedia Dialog (132 Chapters, Authentic Duas)
+ * with Heart Favorites on every Chapter & every Dhikr, and Long-Press editing of text & repeat counts.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HisnAlMuslimCompleteDialog(
     initialGroupKey: String = HisnSectionGroup.ALL.key,
+    initialChapterId: Int? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
+    val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
 
-    val allChapters = remember { HisnAlMuslimRepository.getChapters(context) }
+    val allChapters = remember(customizationVersion) {
+        HisnAlMuslimRepository.getEffectiveChapters(context)
+    }
+    val favoriteChapterIds = remember(customizationVersion) {
+        AdhkarCustomizationManager.getFavoriteChapterIds(context)
+    }
+    val favoriteItemKeys = remember(customizationVersion) {
+        AdhkarCustomizationManager.getFavoriteItems(context).map { it.uniqueKey }.toSet()
+    }
+
     var searchQuery by remember { mutableStateOf("") }
     var selectedGroup by remember {
         mutableStateOf(
             HisnSectionGroup.values().find { it.key == initialGroupKey } ?: HisnSectionGroup.ALL
         )
     }
-    var activeChapter by remember { mutableStateOf<HisnCategoryChapter?>(null) }
+    var activeChapterId by remember { mutableStateOf(initialChapterId) }
+    val activeChapter = remember(allChapters, activeChapterId) {
+        activeChapterId?.let { targetId -> allChapters.find { it.id == targetId } }
+    }
+
+    var showFavoritesDialogFromInside by remember { mutableStateOf(false) }
+    var showAddDhikrInActiveChapter by remember { mutableStateOf(false) }
+    var editingDuaEntry by remember { mutableStateOf<HisnDuaEntry?>(null) }
 
     val normalizedQuery = remember(searchQuery) {
         QuranTextMatcher.normalizeArabic(searchQuery)
@@ -209,7 +290,6 @@ fun HisnAlMuslimCompleteDialog(
         }
     }
 
-    // Direct Dua matches when user searches for a specific phrase inside any Dua
     val directSearchDuaMatches = remember(allChapters, normalizedQuery) {
         if (normalizedQuery.length < 2) {
             emptyList()
@@ -230,8 +310,8 @@ fun HisnAlMuslimCompleteDialog(
 
     Dialog(
         onDismissRequest = {
-            if (activeChapter != null) {
-                activeChapter = null
+            if (activeChapterId != null && initialChapterId == null) {
+                activeChapterId = null
             } else {
                 onDismiss()
             }
@@ -246,7 +326,7 @@ fun HisnAlMuslimCompleteDialog(
             color = unifiedLightBg
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // 1. Top Ornate Header Bar
+                // 1. Top Ornate Header Bar (with Heart Icon next to X button as marked in user's screenshot)
                 Surface(
                     color = RoyalNavyDark,
                     modifier = Modifier.fillMaxWidth()
@@ -267,8 +347,10 @@ fun HisnAlMuslimCompleteDialog(
                             ) {
                                 if (activeChapter != null) {
                                     IconButton(
-                                        onClick = { activeChapter = null },
-                                        modifier = Modifier.size(38.dp)
+                                        onClick = {
+                                            if (initialChapterId != null) onDismiss() else activeChapterId = null
+                                        },
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -298,42 +380,130 @@ fun HisnAlMuslimCompleteDialog(
 
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = activeChapter?.title ?: "فهرس حصن المسلم الكامل (أوفلاين)",
+                                        text = activeChapter?.title ?: "فهرس حصن المسلم الكامل",
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 20.sp,
+                                        fontSize = 19.sp,
+                                        lineHeight = 26.sp,
                                         color = EmeraldGreen,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
+                                    Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = if (activeChapter != null)
-                                            "الباب رقم ${activeChapter!!.id} من ١٣٢ • ${activeChapter!!.duas.size} ذكر ودعاء صحيح"
+                                            "الباب رقم ${activeChapter.id} من ١٣٢ • ${activeChapter.duas.size} ذكر ودعاء"
                                         else
-                                            "جميع أبواب وأدعية حصن المسلم (${allChapters.size} باباً) كاملة بدون إنترنت",
+                                            "جميع الأبواب والأدعية (${allChapters.size} باباً) أوفلاين بالكامل",
                                         fontSize = 11.sp,
-                                        color = darkInkText.copy(alpha = 0.78f)
+                                        color = darkInkText.copy(alpha = 0.78f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
 
-                            IconButton(
-                                onClick = {
-                                    if (activeChapter != null) {
-                                        activeChapter = null
-                                    } else {
-                                        onDismiss()
+                            // Action Icons on the left of the Header (Heart Icon in the red box + Add + Close X)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (activeChapter != null) {
+                                    val isChapFav = favoriteChapterIds.contains(activeChapter.id)
+                                    // Heart Button for the entire Chapter (exact position marked in Screenshot 2)
+                                    IconButton(
+                                        onClick = {
+                                            val added = AdhkarCustomizationManager.toggleChapterFavorite(context, activeChapter.id)
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            Toast.makeText(
+                                                context,
+                                                if (added) "تمت إضافة باب «${activeChapter.title}» إلى المفضلة ❤️"
+                                                else "تمت إزالة الباب من المفضلة",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFFDF8EC))
+                                            .border(1.dp, if (isChapFav) FavoriteHeartCrimson else GoldBorder, CircleShape)
+                                            .testTag("toggle_chapter_favorite_header_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isChapFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = "إضافة الباب للمفضلة",
+                                            tint = if (isChapFav) FavoriteHeartCrimson else GoldAccent,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+
+                                    // Quick Add Custom Dhikr to this Chapter
+                                    IconButton(
+                                        onClick = { showAddDhikrInActiveChapter = true },
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFFDF8EC))
+                                            .border(1.dp, EmeraldGreen, CircleShape)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "إضافة ذكر لهذا الباب",
+                                            tint = EmeraldGreen,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+                                } else {
+                                    // In Index View: Quick Heart Button to open Favorites Dialog
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = Color(0xFFFDF8EC),
+                                        border = BorderStroke(1.dp, FavoriteHeartCrimson),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .clickable { showFavoritesDialogFromInside = true }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Favorite,
+                                                contentDescription = "الأذكار المفضلة",
+                                                tint = FavoriteHeartCrimson,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "المفضلة",
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = FavoriteHeartCrimson
+                                            )
+                                        }
                                     }
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "إغلاق",
-                                    tint = EmeraldGreen
-                                )
+
+                                IconButton(
+                                    onClick = {
+                                        if (activeChapterId != null && initialChapterId == null) {
+                                            activeChapterId = null
+                                        } else {
+                                            onDismiss()
+                                        }
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "إغلاق",
+                                        tint = EmeraldGreen
+                                    )
+                                }
                             }
                         }
 
-                        // Search Bar (Visible in Index view)
+                        // Search Bar (Visible in Index view — concise single-line placeholder as marked in Screenshot 1)
                         if (activeChapter == null) {
                             Spacer(modifier = Modifier.height(10.dp))
                             OutlinedTextField(
@@ -341,9 +511,11 @@ fun HisnAlMuslimCompleteDialog(
                                 onValueChange = { searchQuery = it },
                                 placeholder = {
                                     Text(
-                                        text = "ابحث عن أي دعاء أو باب (مثال: الاستخارة، السفر، الكرب، النوم...)",
+                                        text = "ابحث عن أي دعاء أو باب (الاستخارة، السفر، النوم...)",
                                         fontSize = 12.sp,
-                                        color = darkInkText.copy(alpha = 0.6f)
+                                        color = darkInkText.copy(alpha = 0.65f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 },
                                 leadingIcon = {
@@ -422,20 +594,24 @@ fun HisnAlMuslimCompleteDialog(
                         chapter = selectedChapter,
                         prefs = prefs,
                         parchmentCard = unifiedLightCard,
-                        warmBrownTitle = unifiedGoldTitle,
-                        onBackToIndex = { activeChapter = null },
+                        favoriteItemKeys = favoriteItemKeys,
+                        onBackToIndex = {
+                            if (initialChapterId != null) onDismiss() else activeChapterId = null
+                        },
                         onNextChapter = {
                             val idx = allChapters.indexOfFirst { it.id == selectedChapter.id }
                             if (idx in 0 until allChapters.size - 1) {
-                                activeChapter = allChapters[idx + 1]
+                                activeChapterId = allChapters[idx + 1].id
                             }
                         },
                         onPrevChapter = {
                             val idx = allChapters.indexOfFirst { it.id == selectedChapter.id }
                             if (idx > 0) {
-                                activeChapter = allChapters[idx - 1]
+                                activeChapterId = allChapters[idx - 1].id
                             }
-                        }
+                        },
+                        onAddDhikrClicked = { showAddDhikrInActiveChapter = true },
+                        onEditDhikrClicked = { dua -> editingDuaEntry = dua }
                     )
                 } else {
                     LazyColumn(
@@ -464,7 +640,7 @@ fun HisnAlMuslimCompleteDialog(
                                         text = "الفهرس (${filteredChapters.size} باباً)",
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 24.sp,
+                                        fontSize = 23.sp,
                                         color = unifiedGoldTitle
                                     )
                                 }
@@ -480,25 +656,29 @@ fun HisnAlMuslimCompleteDialog(
                             HorizontalDivider(thickness = 1.2.dp, color = unifiedGoldDivider)
                         }
 
-                        // Index List of Chapters in Unified Light Mushaf Card Theme
+                        // Index List of Chapters — Each Chapter has an external Heart Icon to add/remove from Favorites
                         items(filteredChapters, key = { "ch_${it.id}" }) { chapter ->
+                            val isChapFav = favoriteChapterIds.contains(chapter.id)
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = unifiedLightCard,
-                                border = BorderStroke(1.dp, unifiedGoldDivider),
+                                border = BorderStroke(
+                                    width = if (isChapFav) 1.4.dp else 1.dp,
+                                    color = if (isChapFav) FavoriteHeartCrimson.copy(alpha = 0.65f) else unifiedGoldDivider
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        activeChapter = chapter
+                                        activeChapterId = chapter.id
                                     }
                                     .testTag("hisn_chapter_item_${chapter.id}")
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -524,25 +704,54 @@ fun HisnAlMuslimCompleteDialog(
                                             text = chapter.title,
                                             fontFamily = AmiriFontFamily,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 20.sp,
-                                            lineHeight = 28.sp,
+                                            fontSize = 19.sp,
+                                            lineHeight = 27.sp,
                                             color = darkInkText,
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
 
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = EmeraldGreen,
-                                        border = BorderStroke(0.6.dp, GoldBorder)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(
-                                            text = "${chapter.duas.size} ذكر",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = EmeraldGreen,
+                                            border = BorderStroke(0.6.dp, GoldBorder)
+                                        ) {
+                                            Text(
+                                                text = "${chapter.duas.size} ذكر",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+
+                                        // External Heart Icon for each Chapter (باب)
+                                        IconButton(
+                                            onClick = {
+                                                val added = AdhkarCustomizationManager.toggleChapterFavorite(context, chapter.id)
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                Toast.makeText(
+                                                    context,
+                                                    if (added) "تمت إضافة باب «${chapter.title}» إلى المفضلة ❤️"
+                                                    else "تمت إزالة الباب من المفضلة",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .testTag("favorite_chapter_button_${chapter.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isChapFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                contentDescription = "إضافة الباب للمفضلة",
+                                                tint = if (isChapFav) FavoriteHeartCrimson else GoldAccent,
+                                                modifier = Modifier.size(21.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -560,17 +769,22 @@ fun HisnAlMuslimCompleteDialog(
                                 )
                             }
                             items(directSearchDuaMatches, key = { "search_${it.uniqueKey}" }) { dua ->
+                                val isDuaFav = favoriteItemKeys.contains(dua.uniqueKey)
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
                                     color = unifiedLightCard,
                                     border = BorderStroke(1.2.dp, GoldAccent),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            allChapters.find { it.id == dua.categoryId }?.let {
-                                                activeChapter = it
+                                        .combinedClickable(
+                                            onClick = {
+                                                activeChapterId = dua.categoryId
+                                            },
+                                            onLongClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                editingDuaEntry = dua
                                             }
-                                        }
+                                        )
                                 ) {
                                     Column(
                                         modifier = Modifier
@@ -582,19 +796,52 @@ fun HisnAlMuslimCompleteDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = "باب: ${dua.categoryTitle}",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = EmeraldGreen,
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.weight(1f)
-                                            )
+                                            ) {
+                                                IconButton(
+                                                    onClick = {
+                                                        val unified = UnifiedDhikrItem(
+                                                            uniqueKey = dua.uniqueKey,
+                                                            scopeKey = "hisn_ch_${dua.categoryId}",
+                                                            title = "${dua.categoryTitle} (${dua.idInChapter})",
+                                                            categoryTitle = dua.categoryTitle,
+                                                            arabicText = dua.arabicText,
+                                                            benefit = dua.benefit,
+                                                            targetCount = dua.targetCount
+                                                        )
+                                                        val added = AdhkarCustomizationManager.toggleDhikrFavorite(context, unified)
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (added) "تمت إضافة الذكر إلى المفضلة ❤️" else "تمت إزالة الذكر من المفضلة",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isDuaFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                        contentDescription = "إضافة للمفضلة",
+                                                        tint = if (isDuaFav) FavoriteHeartCrimson else GoldAccent,
+                                                        modifier = Modifier.size(19.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "باب: ${dua.categoryTitle}",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = EmeraldGreen,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
                                                 color = EmeraldGreen
                                             ) {
                                                 Text(
-                                                    text = if (dua.targetCount == 1) "مرة واحدة" else "${dua.targetCount} مرات",
+                                                    text = formatRepeatCountArabic(dua.targetCount),
                                                     color = Color.White,
                                                     fontSize = 10.5.sp,
                                                     fontWeight = FontWeight.Bold,
@@ -639,23 +886,59 @@ fun HisnAlMuslimCompleteDialog(
             }
         }
     }
+
+    if (showFavoritesDialogFromInside) {
+        FavoriteAdhkarDialog(
+            onOpenHisnChapter = { ch ->
+                showFavoritesDialogFromInside = false
+                activeChapterId = ch.id
+            },
+            onDismiss = { showFavoritesDialogFromInside = false }
+        )
+    }
+
+    if (showAddDhikrInActiveChapter && activeChapter != null) {
+        AddOrEditDhikrDialog(
+            isEditMode = false,
+            scopeKey = "hisn_ch_${activeChapter.id}",
+            categoryTitle = activeChapter.title,
+            onDismiss = { showAddDhikrInActiveChapter = false }
+        )
+    }
+
+    editingDuaEntry?.let { target ->
+        AddOrEditDhikrDialog(
+            isEditMode = true,
+            scopeKey = "hisn_ch_${target.categoryId}",
+            categoryTitle = target.categoryTitle,
+            initialUniqueKey = target.uniqueKey,
+            initialTitle = "${target.categoryTitle} - الذكر (${target.idInChapter})",
+            initialArabicText = target.arabicText,
+            initialBenefit = target.benefit,
+            initialTargetCount = target.targetCount,
+            onDismiss = { editingDuaEntry = null }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HisnChapterDetailView(
     chapter: HisnCategoryChapter,
     prefs: android.content.SharedPreferences,
     parchmentCard: Color,
-    warmBrownTitle: Color,
+    favoriteItemKeys: Set<String>,
     onBackToIndex: () -> Unit,
     onNextChapter: () -> Unit,
-    onPrevChapter: () -> Unit
+    onPrevChapter: () -> Unit,
+    onAddDhikrClicked: () -> Unit,
+    onEditDhikrClicked: (HisnDuaEntry) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
 
-    val counts = remember(chapter.id) {
+    val counts = remember(chapter.id, chapter.duas) {
         mutableStateMapOf<String, Int>().apply {
             chapter.duas.forEach { d ->
                 this[d.uniqueKey] = prefs.getInt(d.uniqueKey, 0)
@@ -670,49 +953,95 @@ private fun HisnChapterDetailView(
             border = BorderStroke(0.8.dp, GoldBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = onPrevChapter,
-                    enabled = chapter.id > 1,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, GoldBorder),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("الباب السابق", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    OutlinedButton(
+                        onClick = onPrevChapter,
+                        enabled = chapter.id > 1,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, GoldBorder),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
+                    ) {
+                        Text("الباب السابق", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(onClick = onBackToIndex) {
+                        Icon(
+                            imageVector = Icons.Default.FormatListBulleted,
+                            contentDescription = null,
+                            tint = EmeraldGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "الفهرس (١٣٢)",
+                            color = EmeraldGreen,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.5.sp
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onNextChapter,
+                        enabled = chapter.id < 132,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, GoldBorder),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
+                    ) {
+                        Text("الباب التالي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
-                TextButton(onClick = onBackToIndex) {
-                    Icon(
-                        imageVector = Icons.Default.FormatListBulleted,
-                        contentDescription = null,
-                        tint = EmeraldGreen,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
+                // Helper Hint Bar: Long-press to edit text/repeat count + Add Dhikr button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "الفهرس (١٣٢)",
-                        color = EmeraldGreen,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 12.5.sp
+                        text = "💡 اضغط مطولاً على أي ذكر لتعديل نصه أو تكراره أو حذفه",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccent,
+                        modifier = Modifier.weight(1f)
                     )
-                }
 
-                OutlinedButton(
-                    onClick = onNextChapter,
-                    enabled = chapter.id < 132,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, GoldBorder),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
-                ) {
-                    Text("الباب التالي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = EmeraldGreen,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAddDhikrClicked() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "إضافة ذكر",
+                                color = Color.White,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -726,20 +1055,27 @@ private fun HisnChapterDetailView(
             items(chapter.duas, key = { it.uniqueKey }) { dua ->
                 val currentCount = counts[dua.uniqueKey] ?: 0
                 val isCompleted = currentCount >= dua.targetCount
+                val isFav = favoriteItemKeys.contains(dua.uniqueKey)
 
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
-                        .clickable {
-                            if (currentCount < dua.targetCount) {
-                                val next = currentCount + 1
-                                counts[dua.uniqueKey] = next
-                                prefs.edit().putInt(dua.uniqueKey, next).apply()
-                                localStorage.incrementCumulativeAdhkarTasbeeh(1)
+                        .combinedClickable(
+                            onClick = {
+                                if (currentCount < dua.targetCount) {
+                                    val next = currentCount + 1
+                                    counts[dua.uniqueKey] = next
+                                    prefs.edit().putInt(dua.uniqueKey, next).apply()
+                                    localStorage.incrementCumulativeAdhkarTasbeeh(1)
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onEditDhikrClicked(dua)
                             }
-                        }
+                        )
                         .border(
                             width = if (isCompleted) 1.8.dp else 1.dp,
                             color = if (isCompleted) EmeraldGreen else GoldBorder,
@@ -755,21 +1091,56 @@ private fun HisnChapterDetailView(
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        // Top Row: Number badge + Target Count badge
+                        // Top Row: Heart Favorite Icon + Number badge + Edit chip + Target Count badge
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Heart Button to Favorite/Unfavorite this individual Dhikr
+                                IconButton(
+                                    onClick = {
+                                        val unified = UnifiedDhikrItem(
+                                            uniqueKey = dua.uniqueKey,
+                                            scopeKey = "hisn_ch_${chapter.id}",
+                                            title = "${chapter.title} (${dua.idInChapter})",
+                                            categoryTitle = chapter.title,
+                                            arabicText = dua.arabicText,
+                                            benefit = dua.benefit,
+                                            targetCount = dua.targetCount,
+                                            isCustomAdded = dua.isCustomAdded
+                                        )
+                                        val added = AdhkarCustomizationManager.toggleDhikrFavorite(context, unified)
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        Toast.makeText(
+                                            context,
+                                            if (added) "تمت إضافة الذكر إلى المفضلة ❤️" else "تمت إزالة الذكر من المفضلة",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .testTag("favorite_dua_button_${dua.uniqueKey}")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "إضافة الذكر للمفضلة",
+                                        tint = if (isFav) FavoriteHeartCrimson else GoldAccent,
+                                        modifier = Modifier.size(21.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(4.dp))
+
                                 if (isCompleted) {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = null,
                                         tint = EmeraldGreen,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(5.dp))
                                 }
                                 Text(
                                     text = "الذكر (${dua.idInChapter})",
@@ -779,23 +1150,52 @@ private fun HisnChapterDetailView(
                                 )
                             }
 
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isCompleted) GoldAccent else EmeraldGreen,
-                                border = BorderStroke(0.8.dp, GoldAccent)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = when (dua.targetCount) {
-                                        1 -> "مرة واحدة"
-                                        2 -> "مرتان"
-                                        in 3..10 -> "${dua.targetCount} مرات"
-                                        else -> "${dua.targetCount} مرة"
-                                    },
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
+                                // Edit / Repeat Count Chip (also triggered on Long-Press)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFEBE1C9),
+                                    border = BorderStroke(0.8.dp, GoldBorder),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onEditDhikrClicked(dua) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "تعديل الذكر والتكرار",
+                                            tint = GoldAccent,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "تعديل",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF1A110B)
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isCompleted) GoldAccent else EmeraldGreen,
+                                    border = BorderStroke(0.8.dp, GoldAccent)
+                                ) {
+                                    Text(
+                                        text = formatRepeatCountArabic(dua.targetCount),
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -813,9 +1213,18 @@ private fun HisnChapterDetailView(
                             modifier = Modifier.fillMaxWidth()
                         )
 
+                        if (dua.benefit.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "الفضل: ${dua.benefit}",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF1A110B).copy(alpha = 0.72f)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Bottom Action Row: Counter + Copy + Share + Reset
+                        // Bottom Action Row: Counter (unclipped single-line) + Copy + Share + Reset
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -837,15 +1246,19 @@ private fun HisnChapterDetailView(
                                 ),
                                 border = BorderStroke(1.dp, GoldAccent),
                                 shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .defaultMinSize(minHeight = 46.dp)
                             ) {
                                 Text(
                                     text = if (isCompleted) "تمت القراءة ✓ ($currentCount/${dua.targetCount})"
                                     else "اضغط للعد ($currentCount / ${dua.targetCount})",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.5.sp
+                                    fontSize = 12.5.sp,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 

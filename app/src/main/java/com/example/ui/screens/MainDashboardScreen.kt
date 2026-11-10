@@ -3,9 +3,11 @@ package com.example.ui.screens
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,12 +40,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NavigateBefore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import com.example.data.local.AdhkarCustomizationManager
+import com.example.data.local.UnifiedDhikrItem
+import com.example.ui.components.AddOrEditDhikrDialog
+import com.example.ui.components.FavoriteHeartCrimson
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -2476,6 +2484,7 @@ fun PostLogReflectionDialog(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TasbeehSection() {
     val context = LocalContext.current
@@ -2485,10 +2494,11 @@ fun TasbeehSection() {
     data class DhikrData(
         val key: String,
         val text: String,
-        val target: Int = 33
+        val target: Int = 33,
+        val isCustom: Boolean = false
     )
 
-    val adhkarList = remember {
+    val baseAdhkarList = remember {
         listOf(
             DhikrData("subhan_allah", "سُبْحَانَ اللَّهِ", 33),
             DhikrData("alhamdulillah", "الْحَمْدُ لِلَّهِ", 33),
@@ -2500,8 +2510,50 @@ fun TasbeehSection() {
 
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val backupVersion by localStorage.backupRestoreVersionFlow.collectAsState()
+    val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
 
-    val counts = remember(backupVersion) {
+    val adhkarList = remember(backupVersion, customizationVersion) {
+        val overrides = AdhkarCustomizationManager.getOverridesMap(context)
+        val deletedKeys = AdhkarCustomizationManager.getDeletedKeys(context)
+        val customAdded = AdhkarCustomizationManager.getCustomAddedAdhkar(context, scopeFilter = "tasbeeh")
+
+        val customMapped = customAdded
+            .filter { !deletedKeys.contains(it.uniqueKey) }
+            .map { c ->
+                val ov = overrides[c.uniqueKey]
+                DhikrData(
+                    key = c.uniqueKey,
+                    text = ov?.arabicText?.ifBlank { c.arabicText } ?: c.arabicText,
+                    target = (ov?.targetCount ?: c.targetCount).coerceAtLeast(1),
+                    isCustom = true
+                )
+            }
+
+        val builtInMapped = baseAdhkarList
+            .filter { !deletedKeys.contains(it.key) }
+            .map { d ->
+                val ov = overrides[d.key]
+                if (ov != null) {
+                    d.copy(
+                        text = ov.arabicText.ifBlank { d.text },
+                        target = ov.targetCount.coerceAtLeast(1)
+                    )
+                } else {
+                    d
+                }
+            }
+
+        customMapped + builtInMapped
+    }
+
+    val favoriteItemKeys = remember(customizationVersion) {
+        AdhkarCustomizationManager.getFavoriteItems(context).map { it.uniqueKey }.toSet()
+    }
+
+    var showAddTasbeehDialog by remember { mutableStateOf(false) }
+    var editingTasbeeh by remember { mutableStateOf<DhikrData?>(null) }
+
+    val counts = remember(backupVersion, adhkarList) {
         mutableStateMapOf<String, Int>().apply {
             adhkarList.forEach { dhikr ->
                 this[dhikr.key] = prefs.getInt(dhikr.key, 0)
@@ -2526,37 +2578,61 @@ fun TasbeehSection() {
             // Header Section — Clean & Unclipped
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(RoyalNavyDark),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(RoyalNavyDark),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = GoldAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "عداد التسبيح والأذكار",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "إجمالي التسبيحات الحالية: $totalCount • اضغط مطولاً لتعديل أي ذكر",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = GoldAccent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // Quick Add Custom Tasbeeh Button
+                OutlinedButton(
+                    onClick = { showAddTasbeehDialog = true },
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, EmeraldGreen),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldGreen)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.TouchApp,
-                        contentDescription = null,
-                        tint = GoldAccent,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "إضافة ذكر للتسبيح",
+                        modifier = Modifier.size(15.dp)
                     )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "عداد التسبيح والأذكار",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "إجمالي التسبيحات الحالية: $totalCount",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = GoldAccent,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("إضافة ذكر", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -2609,23 +2685,30 @@ fun TasbeehSection() {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Adhkar Clickable Buttons
+            // Adhkar Clickable Buttons (Tap = +1, Long-Press = Edit text / repeat count / delete, Heart = Favorite)
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 adhkarList.forEach { dhikr ->
                     val count = counts[dhikr.key] ?: 0
                     val isTargetReached = count >= dhikr.target
+                    val isFav = favoriteItemKeys.contains(dhikr.key)
 
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .clickable {
-                                val newCount = count + 1
-                                counts[dhikr.key] = newCount
-                                prefs.edit().putInt(dhikr.key, newCount).apply()
-                                localStorage.incrementCumulativeAdhkarTasbeeh(1)
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
+                            .combinedClickable(
+                                onClick = {
+                                    val newCount = count + 1
+                                    counts[dhikr.key] = newCount
+                                    prefs.edit().putInt(dhikr.key, newCount).apply()
+                                    localStorage.incrementCumulativeAdhkarTasbeeh(1)
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    editingTasbeeh = dhikr
+                                }
+                            )
                             .border(
                                 width = if (isTargetReached) 1.5.dp else 0.8.dp,
                                 color = if (isTargetReached) EmeraldGreen else GoldBorder,
@@ -2642,38 +2725,76 @@ fun TasbeehSection() {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = dhikr.text,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isTargetReached) EmeraldGreen else MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "مرات التسبيح: ",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-                                    )
-                                    Text(
-                                        text = "$count",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = GoldAccent
-                                    )
-                                    if (isTargetReached) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            imageVector = Icons.Default.Star,
-                                            contentDescription = "تم إكمال الورد",
-                                            tint = GoldAccent,
-                                            modifier = Modifier.size(16.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                // Heart Favorite Button on every Tasbeeh Dhikr
+                                IconButton(
+                                    onClick = {
+                                        val unified = UnifiedDhikrItem(
+                                            uniqueKey = dhikr.key,
+                                            scopeKey = "tasbeeh",
+                                            title = dhikr.text,
+                                            categoryTitle = "عداد التسبيح والأذكار",
+                                            arabicText = dhikr.text,
+                                            benefit = "",
+                                            targetCount = dhikr.target,
+                                            isCustomAdded = dhikr.isCustom
                                         )
+                                        val added = AdhkarCustomizationManager.toggleDhikrFavorite(context, unified)
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        Toast.makeText(
+                                            context,
+                                            if (added) "تمت إضافة الذكر إلى المفضلة ❤️" else "تمت إزالة الذكر من المفضلة",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "إضافة للمفضلة",
+                                        tint = if (isFav) FavoriteHeartCrimson else GoldAccent,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = dhikr.text,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isTargetReached) EmeraldGreen else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "مرات التسبيح: ",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                        )
+                                        Text(
+                                            text = "$count / ${dhikr.target}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = GoldAccent
+                                        )
+                                        if (isTargetReached) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = "تم إكمال الورد",
+                                                tint = GoldAccent,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2705,7 +2826,7 @@ fun TasbeehSection() {
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
 
                                 IconButton(
                                     onClick = {
@@ -2728,5 +2849,29 @@ fun TasbeehSection() {
                 }
             }
         }
+    }
+
+    if (showAddTasbeehDialog) {
+        AddOrEditDhikrDialog(
+            isEditMode = false,
+            scopeKey = "tasbeeh",
+            categoryTitle = "عداد التسبيح والأذكار",
+            initialTargetCount = 33,
+            onDismiss = { showAddTasbeehDialog = false }
+        )
+    }
+
+    editingTasbeeh?.let { target ->
+        AddOrEditDhikrDialog(
+            isEditMode = true,
+            scopeKey = "tasbeeh",
+            categoryTitle = "عداد التسبيح والأذكار",
+            initialUniqueKey = target.key,
+            initialTitle = target.text,
+            initialArabicText = target.text,
+            initialBenefit = "",
+            initialTargetCount = target.target,
+            onDismiss = { editingTasbeeh = null }
+        )
     }
 }

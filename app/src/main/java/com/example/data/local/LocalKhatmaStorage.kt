@@ -583,6 +583,10 @@ class LocalKhatmaStorage private constructor(context: Context) {
         val adhkarPrefs = appCtx.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE)
         root.put("morningEveningAdhkarPrefs", sharedPrefsToJson(adhkarPrefs))
 
+        // 8. Favorite Adhkar, Favorite Chapters, Custom Manual Adhkar & Repeat Overrides
+        val adhkarCustomPrefs = appCtx.getSharedPreferences(AdhkarCustomizationManager.PREFS_NAME, Context.MODE_PRIVATE)
+        root.put("adhkarCustomizationsPrefs", sharedPrefsToJson(adhkarCustomPrefs))
+
         return root.toString(2)
     }
 
@@ -683,6 +687,13 @@ class LocalKhatmaStorage private constructor(context: Context) {
             if (root.has("morningEveningAdhkarPrefs")) {
                 val adhkarPrefs = appCtx.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE)
                 jsonToSharedPrefs(root.getJSONObject("morningEveningAdhkarPrefs"), adhkarPrefs)
+            }
+
+            // 8. Restore Favorite Adhkar, Favorite Chapters, Custom Manual Adhkar & Repeat Overrides
+            if (root.has("adhkarCustomizationsPrefs")) {
+                val adhkarCustomPrefs = appCtx.getSharedPreferences(AdhkarCustomizationManager.PREFS_NAME, Context.MODE_PRIVATE)
+                jsonToSharedPrefs(root.getJSONObject("adhkarCustomizationsPrefs"), adhkarCustomPrefs)
+                AdhkarCustomizationManager.notifyUpdated()
             }
 
             // Refresh all StateFlows immediately so UI reflects restored progress & settings right away
