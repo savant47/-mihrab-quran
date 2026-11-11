@@ -18,6 +18,8 @@ data class OfflineVerse(
     val textEn: String,
     val tafsirMuyassar: String,
     val juz: Int,
+    val hizb: Int = 1,
+    val rubInHizb: Int = 1,
     val page: Int,
     val isSajda: Boolean,
     val normalizedTextAr: String
@@ -37,6 +39,16 @@ data class OfflineSurah(
 object OfflineQuranDatabase {
     private const val TAG = "OfflineQuranDatabase"
     private const val ASSET_FILE = "quran_full_offline.json"
+
+    // Canonical 41 Rub' Al-Hizb start positions that coincide with Ayah 1 of a Surah
+    // (Together with the 199 in-text '\u06DE' ۞ markers in quran_full_offline.json = 240 exact Rub' Al-Hizbs / 60 Hizbs / 30 Juz)
+    private val SURAH_START_RUB_KEYS = setOf(
+        "1:1", "4:1", "5:1", "7:1", "8:1", "9:1", "15:1", "16:1", "17:1",
+        "20:1", "21:1", "22:1", "23:1", "24:1", "25:1", "26:1", "27:1",
+        "29:1", "30:1", "33:1", "40:1", "46:1", "51:1", "55:1", "56:1",
+        "58:1", "61:1", "62:1", "65:1", "67:1", "68:1", "69:1", "72:1",
+        "75:1", "78:1", "80:1", "82:1", "84:1", "87:1", "90:1", "94:1"
+    )
 
     @Volatile
     private var isLoaded = false
@@ -68,6 +80,7 @@ object OfflineQuranDatabase {
                 val loadedSurahs = ArrayList<OfflineSurah>(114)
                 val loadedVerses = ArrayList<OfflineVerse>(6236)
                 val pageMap = HashMap<Int, MutableList<OfflineVerse>>(610)
+                var currentRubIndex = -1
 
                 for (i in 0 until rootArray.length()) {
                     val sObj = rootArray.getJSONObject(i)
@@ -92,6 +105,13 @@ object OfflineQuranDatabase {
                         val page = vObj.optInt("p", 1).coerceIn(1, 604)
                         val sajda = vObj.optBoolean("s", false)
 
+                        if (arText.contains('\u06DE') || SURAH_START_RUB_KEYS.contains("$sNum:$vNum")) {
+                            currentRubIndex++
+                        }
+                        val safeRubIdx = currentRubIndex.coerceIn(0, 239)
+                        val exactHizb = ((safeRubIdx / 4) + 1).coerceIn(1, 60)
+                        val exactRubInHizb = ((safeRubIdx % 4) + 1).coerceIn(1, 4)
+
                         if (j == 0) firstPage = page
 
                         val verse = OfflineVerse(
@@ -104,6 +124,8 @@ object OfflineQuranDatabase {
                             textEn = enText,
                             tafsirMuyassar = tafsir,
                             juz = juz,
+                            hizb = exactHizb,
+                            rubInHizb = exactRubInHizb,
                             page = page,
                             isSajda = sajda,
                             normalizedTextAr = QuranTextMatcher.normalizeArabic(arText)

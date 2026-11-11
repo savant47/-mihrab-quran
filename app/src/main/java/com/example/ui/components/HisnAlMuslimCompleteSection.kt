@@ -47,6 +47,7 @@ import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
 import com.example.ui.theme.RoyalNavyDark
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -249,8 +250,21 @@ fun HisnAlMuslimCompleteDialog(
     val haptic = LocalHapticFeedback.current
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
     val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
+    var dailyResetTrigger by remember { mutableStateOf(0) }
 
-    val allChapters = remember(customizationVersion) {
+    // Automatic Daily Reset at 12:00 AM midnight while Hisn Al-Muslim is open
+    LaunchedEffect(Unit) {
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
+        dailyResetTrigger++
+        while (true) {
+            delay(20_000L)
+            if (ensureDailyAdhkarResetIfNewDay(prefs, context)) {
+                dailyResetTrigger++
+            }
+        }
+    }
+
+    val allChapters = remember(customizationVersion, dailyResetTrigger) {
         HisnAlMuslimRepository.getEffectiveChapters(context)
     }
     val favoriteChapterIds = remember(customizationVersion) {
@@ -454,7 +468,51 @@ fun HisnAlMuslimCompleteDialog(
                                         )
                                     }
                                 } else {
-                                    // In Index View: Quick Heart Button to open Favorites Dialog
+                                    // In Index View: Manual Reset All Hisn Chapters Button + Quick Heart Button to open Favorites Dialog
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = Color(0xFFFDF8EC),
+                                        border = BorderStroke(1.dp, GoldAccent),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .clickable {
+                                                val editor = prefs.edit()
+                                                allChapters.forEach { ch ->
+                                                    ch.duas.forEach { d ->
+                                                        editor.putInt(d.uniqueKey, 0)
+                                                    }
+                                                }
+                                                editor.apply()
+                                                dailyResetTrigger++
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                Toast.makeText(
+                                                    context,
+                                                    "تم تصفير عدادات كافة أبواب حصن المسلم بنجاح",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            .testTag("reset_all_hisn_chapters_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "تصفير الكل",
+                                                tint = GoldAccent,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "تصفير الكل",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = GoldAccent
+                                            )
+                                        }
+                                    }
+
                                     Surface(
                                         shape = RoundedCornerShape(50),
                                         color = Color(0xFFFDF8EC),
@@ -593,6 +651,7 @@ fun HisnAlMuslimCompleteDialog(
                     HisnChapterDetailView(
                         chapter = selectedChapter,
                         prefs = prefs,
+                        resetTrigger = dailyResetTrigger,
                         parchmentCard = unifiedLightCard,
                         favoriteItemKeys = favoriteItemKeys,
                         onBackToIndex = {
@@ -926,6 +985,7 @@ fun HisnAlMuslimCompleteDialog(
 private fun HisnChapterDetailView(
     chapter: HisnCategoryChapter,
     prefs: android.content.SharedPreferences,
+    resetTrigger: Int = 0,
     parchmentCard: Color,
     favoriteItemKeys: Set<String>,
     onBackToIndex: () -> Unit,
@@ -938,7 +998,8 @@ private fun HisnChapterDetailView(
     val haptic = LocalHapticFeedback.current
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
 
-    val counts = remember(chapter.id, chapter.duas) {
+    val counts = remember(chapter.id, chapter.duas, resetTrigger) {
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
         mutableStateMapOf<String, Int>().apply {
             chapter.duas.forEach { d ->
                 this[d.uniqueKey] = prefs.getInt(d.uniqueKey, 0)
@@ -1000,7 +1061,7 @@ private fun HisnChapterDetailView(
                     }
                 }
 
-                // Helper Hint Bar: Long-press to edit text/repeat count + Add Dhikr button
+                // Helper Hint Bar: Long-press to edit text/repeat count + Manual Reset Chapter button + Add Dhikr button
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1010,36 +1071,84 @@ private fun HisnChapterDetailView(
                 ) {
                     Text(
                         text = "💡 اضغط مطولاً على أي ذكر لتعديل نصه أو تكراره أو حذفه",
-                        fontSize = 10.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = GoldAccent,
                         modifier = Modifier.weight(1f)
                     )
 
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = EmeraldGreen,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onAddDhikrClicked() }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        // Manual Reset Button for this Chapter (تصفير الباب)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFFDF8EC),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val editor = prefs.edit()
+                                    chapter.duas.forEach { d ->
+                                        counts[d.uniqueKey] = 0
+                                        editor.putInt(d.uniqueKey, 0)
+                                    }
+                                    editor.apply()
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    Toast.makeText(
+                                        context,
+                                        "تم تصفير عدادات باب «${chapter.title}»",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                .testTag("reset_hisn_chapter_button")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "إضافة ذكر",
-                                color = Color.White,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "تصفير الباب",
+                                    tint = GoldAccent,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "تصفير الباب",
+                                    color = GoldAccent,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = EmeraldGreen,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onAddDhikrClicked() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "إضافة ذكر",
+                                    color = Color.White,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

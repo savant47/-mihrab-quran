@@ -396,10 +396,14 @@ private fun AdhkarActiveAudioPlayerBar(
 private const val KEY_LAST_DAILY_ADHKAR_RESET_DATE = "last_daily_reset_date_yyyy_mm_dd"
 
 /**
- * Automatically resets Morning & Evening Adhkar daily progress to 0 whenever the calendar date
- * changes at 12:00 AM midnight.
+ * Automatically resets ALL Adhkar daily progress (Morning, Evening, all 132 Hisn Al-Muslim chapters,
+ * Favorite Adhkar, custom Adhkar, and daily Electronic Tasbeeh session counters) to 0 whenever
+ * the calendar date changes at 12:00 AM midnight, while preserving the permanent cumulative total in History.
  */
-fun ensureDailyAdhkarResetIfNewDay(prefs: android.content.SharedPreferences): Boolean {
+fun ensureDailyAdhkarResetIfNewDay(
+    prefs: android.content.SharedPreferences,
+    context: Context? = null
+): Boolean {
     val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     val lastResetDate = prefs.getString(KEY_LAST_DAILY_ADHKAR_RESET_DATE, null)
     if (lastResetDate != todayKey) {
@@ -407,15 +411,52 @@ fun ensureDailyAdhkarResetIfNewDay(prefs: android.content.SharedPreferences): Bo
         if (lastResetDate != null) {
             AuthenticAdhkarData.morningAdhkar.forEach { editor.putInt(it.id, 0) }
             AuthenticAdhkarData.eveningAdhkar.forEach { editor.putInt(it.id, 0) }
-            prefs.all.keys
-                .filter { it.startsWith("custom_morning_") || it.startsWith("custom_evening_") }
-                .forEach { editor.putInt(it, 0) }
+            prefs.all.forEach { (key, value) ->
+                if (key != KEY_LAST_DAILY_ADHKAR_RESET_DATE && value is Int) {
+                    editor.putInt(key, 0)
+                }
+            }
+            if (context != null) {
+                val tasbeehPrefs = context.getSharedPreferences("tasbeeh_prefs", Context.MODE_PRIVATE)
+                val tEdit = tasbeehPrefs.edit()
+                tasbeehPrefs.all.forEach { (k, v) ->
+                    if (v is Int) {
+                        tEdit.putInt(k, 0)
+                    }
+                }
+                tEdit.apply()
+            }
         }
         editor.putString(KEY_LAST_DAILY_ADHKAR_RESET_DATE, todayKey)
         editor.apply()
         return lastResetDate != null
     }
     return false
+}
+
+fun resetAllAdhkarCountersManually(
+    prefs: android.content.SharedPreferences,
+    context: Context? = null
+) {
+    val editor = prefs.edit()
+    AuthenticAdhkarData.morningAdhkar.forEach { editor.putInt(it.id, 0) }
+    AuthenticAdhkarData.eveningAdhkar.forEach { editor.putInt(it.id, 0) }
+    prefs.all.forEach { (key, value) ->
+        if (key != KEY_LAST_DAILY_ADHKAR_RESET_DATE && value is Int) {
+            editor.putInt(key, 0)
+        }
+    }
+    editor.apply()
+    if (context != null) {
+        val tasbeehPrefs = context.getSharedPreferences("tasbeeh_prefs", Context.MODE_PRIVATE)
+        val tEdit = tasbeehPrefs.edit()
+        tasbeehPrefs.all.forEach { (k, v) ->
+            if (v is Int) {
+                tEdit.putInt(k, 0)
+            }
+        }
+        tEdit.apply()
+    }
 }
 
 data class HisnDhikrItem(
@@ -725,12 +766,12 @@ fun MorningEveningAdhkarBox() {
 
     // Automatic Daily Reset at 12:00 AM midnight (checks on launch and every 20 seconds while open)
     LaunchedEffect(Unit) {
-        if (ensureDailyAdhkarResetIfNewDay(prefs)) {
+        if (ensureDailyAdhkarResetIfNewDay(prefs, context)) {
             refreshTrigger++
         }
         while (true) {
             delay(20_000L)
-            if (ensureDailyAdhkarResetIfNewDay(prefs)) {
+            if (ensureDailyAdhkarResetIfNewDay(prefs, context)) {
                 refreshTrigger++
             }
         }
@@ -747,13 +788,13 @@ fun MorningEveningAdhkarBox() {
     }
 
     val morningCompleted = remember(refreshTrigger, activeDialogType, backupVersion, effectiveMorningItems) {
-        ensureDailyAdhkarResetIfNewDay(prefs)
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
         effectiveMorningItems.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
     }
     val eveningCompleted = remember(refreshTrigger, activeDialogType, backupVersion, effectiveEveningItems) {
-        ensureDailyAdhkarResetIfNewDay(prefs)
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
         effectiveEveningItems.count { item ->
             prefs.getInt(item.id, 0) >= item.targetCount
         }
@@ -777,35 +818,73 @@ fun MorningEveningAdhkarBox() {
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(RoyalNavyDark),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = GoldAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "أذكار الصباح والمساء وحصن المسلم",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                        Text(
+                            text = "تصفير تلقائي يومياً 12:00 ص • تصفير يدوي لكل قسم وباب",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // Manual Reset Button for All Adhkar on the main box
+                OutlinedButton(
+                    onClick = {
+                        resetAllAdhkarCountersManually(prefs, context)
+                        refreshTrigger++
+                        android.widget.Toast.makeText(
+                            context,
+                            "تم تصفير وإعادة ضبط عدادات كافة الأذكار بنجاح",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, GoldAccent),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(RoyalNavyDark),
-                    contentAlignment = Alignment.Center
+                        .height(32.dp)
+                        .testTag("reset_all_adhkar_main_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = null,
-                        tint = GoldAccent,
-                        modifier = Modifier.size(18.dp)
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "تصفير كافة الأذكار",
+                        modifier = Modifier.size(14.dp)
                     )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = "أذكار الصباح والمساء وحصن المسلم",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
-                    )
-                    Text(
-                        text = "تصفير تلقائي يومياً 12:00 ص • المفضلة وتعديل التكرار بضغطة طويلة",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-                        fontSize = 11.sp
+                        text = "تصفير الكل",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }

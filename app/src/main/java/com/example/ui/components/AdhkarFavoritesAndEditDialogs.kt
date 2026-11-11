@@ -47,6 +47,7 @@ import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
 import com.example.ui.theme.RoyalNavyDark
+import kotlinx.coroutines.delay
 
 val FavoriteHeartCrimson = Color(0xFFC62828)
 
@@ -400,22 +401,38 @@ fun FavoriteAdhkarDialog(
     val prefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val customizationVersion by AdhkarCustomizationManager.versionFlow.collectAsState()
+    var dailyResetTrigger by remember { mutableStateOf(0) }
 
-    val allHisnChapters = remember { HisnAlMuslimRepository.getChapters(context) }
+    // Automatic Daily Reset at 12:00 AM midnight while FavoriteAdhkarDialog is open
+    LaunchedEffect(Unit) {
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
+        dailyResetTrigger++
+        while (true) {
+            delay(20_000L)
+            if (ensureDailyAdhkarResetIfNewDay(prefs, context)) {
+                dailyResetTrigger++
+            }
+        }
+    }
+
+    val allHisnChapters = remember(customizationVersion, dailyResetTrigger) {
+        HisnAlMuslimRepository.getEffectiveChapters(context)
+    }
 
     val favoriteChapters = remember(customizationVersion, allHisnChapters) {
         val favIds = AdhkarCustomizationManager.getFavoriteChapterIds(context)
         allHisnChapters.filter { favIds.contains(it.id) }
     }
 
-    val favoriteItems = remember(customizationVersion) {
+    val favoriteItems = remember(customizationVersion, dailyResetTrigger) {
         AdhkarCustomizationManager.getFavoriteItems(context)
     }
 
     var showAddManualDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<UnifiedDhikrItem?>(null) }
 
-    val counts = remember(favoriteItems) {
+    val counts = remember(favoriteItems, dailyResetTrigger) {
+        ensureDailyAdhkarResetIfNewDay(prefs, context)
         mutableStateMapOf<String, Int>().apply {
             favoriteItems.forEach { item ->
                 this[item.uniqueKey] = prefs.getInt("fav_cnt_${item.uniqueKey}", 0)
@@ -483,19 +500,64 @@ fun FavoriteAdhkarDialog(
                                         color = EmeraldGreen
                                     )
                                     Text(
-                                        text = "اضغط مطولاً على أي ذكر لتعديل نصه أو تكراره أو حذفه",
+                                        text = "تصفير تلقائي يومياً 12:00 ص • اضغط مطولاً للتعديل أو الحذف",
                                         fontSize = 11.sp,
                                         color = darkInkText.copy(alpha = 0.78f)
                                     )
                                 }
                             }
 
-                            IconButton(onClick = onDismiss) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "إغلاق المفضلة",
-                                    tint = EmeraldGreen
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Manual Reset All Favorites Button in Header
+                                OutlinedButton(
+                                    onClick = {
+                                        val editor = prefs.edit()
+                                        favoriteItems.forEach { item ->
+                                            counts[item.uniqueKey] = 0
+                                            editor.putInt("fav_cnt_${item.uniqueKey}", 0)
+                                            editor.putInt(item.uniqueKey, 0)
+                                        }
+                                        favoriteChapters.forEach { ch ->
+                                            ch.duas.forEach { d ->
+                                                editor.putInt(d.uniqueKey, 0)
+                                            }
+                                        }
+                                        editor.apply()
+                                        dailyResetTrigger++
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        Toast.makeText(
+                                            context,
+                                            "تم تصفير وإعادة ضبط عدادات كافة الأذكار والأبواب المفضلة",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, GoldAccent),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("reset_all_favorites_header_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "تصفير المفضلة",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("تصفير الكل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                IconButton(onClick = onDismiss) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "إغلاق المفضلة",
+                                        tint = EmeraldGreen
+                                    )
+                                }
                             }
                         }
 
@@ -543,16 +605,48 @@ fun FavoriteAdhkarDialog(
                     // Favorite Chapters Section
                     if (favoriteChapters.isNotEmpty()) {
                         item {
-                            Text(
-                                text = "📚 الأبواب المفضلة من حصن المسلم (${favoriteChapters.size}):",
-                                fontFamily = AmiriFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = EmeraldGreen
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "📚 الأبواب المفضلة من حصن المسلم (${favoriteChapters.size}):",
+                                    fontFamily = AmiriFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = EmeraldGreen
+                                )
+                                TextButton(
+                                    onClick = {
+                                        val editor = prefs.edit()
+                                        favoriteChapters.forEach { ch ->
+                                            ch.duas.forEach { d ->
+                                                editor.putInt(d.uniqueKey, 0)
+                                            }
+                                        }
+                                        editor.apply()
+                                        dailyResetTrigger++
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        Toast.makeText(context, "تم تصفير عدادات الأبواب المفضلة", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = GoldAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("تصفير الأبواب", fontSize = 11.5.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
 
-                        items(favoriteChapters, key = { "fav_ch_${it.id}" }) { chapter ->
+                        items(favoriteChapters, key = { "fav_ch_${it.id}_$dailyResetTrigger" }) { chapter ->
+                            val completedInChap = chapter.duas.count { d ->
+                                prefs.getInt(d.uniqueKey, 0) >= d.targetCount
+                            }
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = unifiedLightCard,
@@ -598,7 +692,7 @@ fun FavoriteAdhkarDialog(
                                                 color = darkInkText
                                             )
                                             Text(
-                                                text = "الباب رقم ${chapter.id} • ${chapter.duas.size} ذكر ودعاء (اضغط لفتح الباب)",
+                                                text = "الباب رقم ${chapter.id} • إنجاز $completedInChap / ${chapter.duas.size} ذكر ودعاء",
                                                 fontSize = 11.sp,
                                                 color = EmeraldGreen,
                                                 fontWeight = FontWeight.SemiBold
@@ -606,17 +700,43 @@ fun FavoriteAdhkarDialog(
                                         }
                                     }
 
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = EmeraldGreen
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(
-                                            text = "فتح الباب",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                        )
+                                        IconButton(
+                                            onClick = {
+                                                val editor = prefs.edit()
+                                                chapter.duas.forEach { d ->
+                                                    editor.putInt(d.uniqueKey, 0)
+                                                }
+                                                editor.apply()
+                                                dailyResetTrigger++
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                Toast.makeText(context, "تم تصفير باب «${chapter.title}»", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "تصفير الباب",
+                                                tint = GoldAccent,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = EmeraldGreen
+                                        ) {
+                                            Text(
+                                                text = "فتح الباب",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -645,10 +765,13 @@ fun FavoriteAdhkarDialog(
                             if (favoriteItems.isNotEmpty()) {
                                 TextButton(
                                     onClick = {
+                                        val editor = prefs.edit()
                                         favoriteItems.forEach { item ->
                                             counts[item.uniqueKey] = 0
-                                            prefs.edit().putInt("fav_cnt_${item.uniqueKey}", 0).apply()
+                                            editor.putInt("fav_cnt_${item.uniqueKey}", 0)
+                                            editor.putInt(item.uniqueKey, 0)
                                         }
+                                        editor.apply()
                                         Toast.makeText(context, "تم تصفير عدادات المفضلة", Toast.LENGTH_SHORT).show()
                                     }
                                 ) {

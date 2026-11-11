@@ -866,12 +866,12 @@ fun MainDashboardScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                            // Telemetry Grid (Shown for Khatma tracks)
+                            // Telemetry Grid (Compact & Organized 2x2 for Khatma tracks)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 MetricCard(
                                     modifier = Modifier.weight(1f),
@@ -889,16 +889,16 @@ fun MainDashboardScreen(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 MetricCard(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(16.dp))
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             quranTargetPage = activeTrack.currentPage
                                             selectedBottomTab = 1
@@ -1822,42 +1822,51 @@ private fun MetricCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector
 ) {
     Card(
-        modifier = modifier.border(0.5.dp, GoldBorder, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.border(0.6.dp, GoldBorder, RoundedCornerShape(12.dp)),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
+                .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = GoldAccent,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(14.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
                     color = GoldAccent,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = value,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontSize = 13.5.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = EmeraldGreen,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(1.dp))
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                fontSize = 12.sp
+                fontSize = 10.5.sp,
+                lineHeight = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -2552,8 +2561,23 @@ fun TasbeehSection() {
 
     var showAddTasbeehDialog by remember { mutableStateOf(false) }
     var editingTasbeeh by remember { mutableStateOf<DhikrData?>(null) }
+    var dailyResetTrigger by remember { mutableStateOf(0) }
+    val adhkarPrefs = remember { context.getSharedPreferences("morning_evening_adhkar_prefs", Context.MODE_PRIVATE) }
 
-    val counts = remember(backupVersion, adhkarList) {
+    LaunchedEffect(Unit) {
+        if (com.example.ui.components.ensureDailyAdhkarResetIfNewDay(adhkarPrefs, context)) {
+            dailyResetTrigger++
+        }
+        while (true) {
+            kotlinx.coroutines.delay(20_000L)
+            if (com.example.ui.components.ensureDailyAdhkarResetIfNewDay(adhkarPrefs, context)) {
+                dailyResetTrigger++
+            }
+        }
+    }
+
+    val counts = remember(backupVersion, adhkarList, dailyResetTrigger) {
+        com.example.ui.components.ensureDailyAdhkarResetIfNewDay(adhkarPrefs, context)
         mutableStateMapOf<String, Int>().apply {
             adhkarList.forEach { dhikr ->
                 this[dhikr.key] = prefs.getInt(dhikr.key, 0)
@@ -2695,7 +2719,7 @@ fun TasbeehSection() {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .combinedClickable(
                                 onClick = {
                                     val newCount = count + 1
@@ -2710,11 +2734,11 @@ fun TasbeehSection() {
                                 }
                             )
                             .border(
-                                width = if (isTargetReached) 1.5.dp else 0.8.dp,
+                                width = if (isTargetReached) 1.4.dp else 0.8.dp,
                                 color = if (isTargetReached) EmeraldGreen else GoldBorder,
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(14.dp)
                             ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isTargetReached)
                                 EmeraldGreen.copy(alpha = 0.08f)
@@ -2722,18 +2746,16 @@ fun TasbeehSection() {
                                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                         )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
+                            // Top Row: Heart Favorite Icon + Full-Width Dhikr Text + Quick Edit Icon
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Heart Favorite Button on every Tasbeeh Dhikr
                                 IconButton(
                                     onClick = {
                                         val unified = UnifiedDhikrItem(
@@ -2754,94 +2776,145 @@ fun TasbeehSection() {
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                         contentDescription = "إضافة للمفضلة",
                                         tint = if (isFav) FavoriteHeartCrimson else GoldAccent,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.width(6.dp))
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = dhikr.text,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isTargetReached) EmeraldGreen else MaterialTheme.colorScheme.onSurface
+                                Text(
+                                    text = dhikr.text,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontSize = 16.sp,
+                                    lineHeight = 23.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isTargetReached) EmeraldGreen else MaterialTheme.colorScheme.onSurface
+                                )
+
+                                IconButton(
+                                    onClick = { editingTasbeeh = dhikr },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "تعديل الذكر",
+                                        tint = GoldAccent.copy(alpha = 0.75f),
+                                        modifier = Modifier.size(15.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Bottom Row: Non-wrapping Counter Badge on Right + Action Buttons (Alarm, +1, Reset) on Left
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isTargetReached)
+                                        EmeraldGreen.copy(alpha = 0.12f)
+                                    else
+                                        GoldAccent.copy(alpha = 0.10f),
+                                    border = BorderStroke(
+                                        0.6.dp,
+                                        if (isTargetReached) EmeraldGreen.copy(alpha = 0.45f) else GoldBorder
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            text = "مرات التسبيح: ",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                            text = "التسبيح: ",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                         Text(
                                             text = "$count / ${dhikr.target}",
-                                            style = MaterialTheme.typography.titleMedium,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.ExtraBold,
-                                            color = GoldAccent
+                                            color = if (isTargetReached) EmeraldGreen else GoldAccent,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                         if (isTargetReached) {
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             Icon(
                                                 imageVector = Icons.Default.Star,
                                                 contentDescription = "تم إكمال الورد",
-                                                tint = GoldAccent,
-                                                modifier = Modifier.size(16.dp)
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     }
                                 }
-                            }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                AlarmTriggerChip(
-                                    targetId = "tasbeeh_${dhikr.key}",
-                                    defaultTitle = "منبه ذكر: ${dhikr.text}",
-                                    defaultSubtitle = "تذكير بتسبيح: ${dhikr.text}",
-                                    defaultHour = 10,
-                                    defaultMinute = 0,
-                                    compact = true
-                                )
-
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(RoyalNavyDark),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text(
-                                        text = "+1",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = GoldAccent
+                                    AlarmTriggerChip(
+                                        targetId = "tasbeeh_${dhikr.key}",
+                                        defaultTitle = "منبه ذكر: ${dhikr.text}",
+                                        defaultSubtitle = "تذكير بتسبيح: ${dhikr.text}",
+                                        defaultHour = 10,
+                                        defaultMinute = 0,
+                                        compact = true
                                     )
-                                }
 
-                                Spacer(modifier = Modifier.width(4.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = EmeraldGreen,
+                                        border = BorderStroke(0.8.dp, GoldAccent.copy(alpha = 0.5f))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "+1",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color(0xFFFDF8EC),
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
 
-                                IconButton(
-                                    onClick = {
-                                        counts[dhikr.key] = 0
-                                        prefs.edit().putInt(dhikr.key, 0).apply()
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "تصفير الذكر",
-                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Surface(
+                                        onClick = {
+                                            counts[dhikr.key] = 0
+                                            prefs.edit().putInt(dhikr.key, 0).apply()
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                        border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "تصفير الذكر",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
