@@ -2464,10 +2464,7 @@ private fun MushafPageContent(
                                     placeholderVerticalAlign = PlaceholderVerticalAlign.Center
                                 )
                             ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.ic_waqf_green_ribbon),
-                                    contentDescription = "علامة توقف القراءة",
-                                    contentScale = ContentScale.Fit,
+                                WaqfGreenRibbonBadge(
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -2680,11 +2677,10 @@ private fun MushafPageContent(
                                             }
                                         }
                                         if (isBookmarked) {
-                                            Image(
-                                                painter = painterResource(id = R.drawable.ic_waqf_green_ribbon),
-                                                contentDescription = "علامة توقف القراءة",
-                                                contentScale = ContentScale.Fit,
-                                                modifier = Modifier.height(26.dp)
+                                            WaqfGreenRibbonBadge(
+                                                modifier = Modifier
+                                                    .width(14.dp)
+                                                    .height(28.dp)
                                             )
                                         }
                                         if (isMemorized) {
@@ -2714,10 +2710,7 @@ private fun MushafPageContent(
                                                 placeholderVerticalAlign = PlaceholderVerticalAlign.Center
                                             )
                                         ) {
-                                            Image(
-                                                painter = painterResource(id = R.drawable.ic_waqf_green_ribbon),
-                                                contentDescription = "علامة توقف القراءة",
-                                                contentScale = ContentScale.Fit,
+                                            WaqfGreenRibbonBadge(
                                                 modifier = Modifier.fillMaxSize()
                                             )
                                         }
@@ -2937,3 +2930,81 @@ private fun SurahOrnamentalBanner(
         }
     }
 }
+
+@Composable
+private fun WaqfGreenRibbonBadge(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w * 0.5f
+
+        val goldOuter = Color(0xFFD9B863)
+        val goldBright = Color(0xFFE5C878)
+        val emeraldDark = Color(0xFF065535)
+        val emeraldMid = Color(0xFF0B6E45)
+        val emeraldCore = Color(0xFF043D26)
+
+        // 1. Vertical Green Ribbon Body with Swallowtail V-Notch at bottom
+        val ribbonLeft = w * 0.24f
+        val ribbonRight = w * 0.76f
+        val ribbonTop = h * 0.24f
+        val ribbonBottom = h * 0.96f
+        val ribbonNotchY = h * 0.88f
+
+        val outerRibbonPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(ribbonLeft, ribbonTop)
+            lineTo(ribbonRight, ribbonTop)
+            lineTo(ribbonRight, ribbonBottom)
+            lineTo(cx, ribbonNotchY)
+            lineTo(ribbonLeft, ribbonBottom)
+            close()
+        }
+        drawPath(path = outerRibbonPath, color = emeraldDark)
+
+        val innerMargin = w * 0.055f
+        val innerRibbonPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(ribbonLeft + innerMargin, ribbonTop)
+            lineTo(ribbonRight - innerMargin, ribbonTop)
+            lineTo(ribbonRight - innerMargin, ribbonBottom - h * 0.02f)
+            lineTo(cx, ribbonNotchY - h * 0.015f)
+            lineTo(ribbonLeft + innerMargin, ribbonBottom - h * 0.02f)
+            close()
+        }
+        drawPath(path = innerRibbonPath, color = emeraldMid)
+
+        // 2. Top 8-Pointed Gold & Emerald Islamic Rosette Medallion
+        val rosetteCenterY = h * 0.21f
+        val rOuter = minOf(w * 0.46f, h * 0.20f)
+
+        fun drawOctagramStar(radius: Float, color: Color) {
+            val halfSide = radius * 0.7071f
+            // Axis-aligned square
+            val sq1 = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx - halfSide, rosetteCenterY - halfSide)
+                lineTo(cx + halfSide, rosetteCenterY - halfSide)
+                lineTo(cx + halfSide, rosetteCenterY + halfSide)
+                lineTo(cx - halfSide, rosetteCenterY + halfSide)
+                close()
+            }
+            drawPath(path = sq1, color = color)
+
+            // 45-degree rotated diamond square
+            val sq2 = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx, rosetteCenterY - radius)
+                lineTo(cx + radius, rosetteCenterY)
+                lineTo(cx, rosetteCenterY + radius)
+                lineTo(cx - radius, rosetteCenterY)
+                close()
+            }
+            drawPath(path = sq2, color = color)
+        }
+
+        drawOctagramStar(rOuter, goldOuter)
+        drawOctagramStar(rOuter * 0.82f, emeraldDark)
+        drawOctagramStar(rOuter * 0.64f, goldBright)
+        drawOctagramStar(rOuter * 0.46f, emeraldCore)
+        drawOctagramStar(rOuter * 0.28f, goldOuter)
+        drawOctagramStar(rOuter * 0.16f, emeraldMid)
+    }
+}
+

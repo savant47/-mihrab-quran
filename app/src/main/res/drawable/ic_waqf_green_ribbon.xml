@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="66dp"
+    android:viewportWidth="80"
+    android:viewportHeight="220">
+
+    <!-- Ribbon Outer Deep Green Body with Swallowtail V-Notch -->
+    <path
+        android:fillColor="#065535"
+        android:pathData="M21,54 L59,54 L59,212 L40,197 L21,212 Z" />
+
+    <!-- Ribbon Inner Rich Emerald Center Panel -->
+    <path
+        android:fillColor="#0B6E45"
+        android:pathData="M25,54 L55,54 L55,208 L40,195 L25,208 Z" />
+
+    <!-- Subtle Vertical Highlight Lines on Ribbon Edges -->
+    <path
+        android:fillColor="#043D26"
+        android:pathData="M24,54 L26,54 L26,208 L24,209 Z" />
+    <path
+        android:fillColor="#043D26"
+        android:pathData="M54,54 L56,54 L56,209 L54,208 Z" />
+
+    <!-- Top Islamic 8-Pointed Gold Rosette Medallion (Outer Gold Star) -->
+    <!-- Square 1 (Axis-aligned) -->
+    <path
+        android:fillColor="#D9B863"
+        android:pathData="M14,14 L66,14 L66,66 L14,66 Z" />
+    <!-- Square 2 (Rotated 45 degrees around 40,40) -->
+    <path
+        android:fillColor="#D9B863"
+        android:pathData="M40,3.2 L76.8,40 L40,76.8 L3.2,40 Z" />
+
+    <!-- Inner Deep Emerald Star Layers -->
+    <path
+        android:fillColor="#085A37"
+        android:pathData="M18,18 L62,18 L62,62 L18,62 Z" />
+    <path
+        android:fillColor="#085A37"
+        android:pathData="M40,8.9 L71.1,40 L40,71.1 L8.9,40 Z" />
+
+    <!-- Interlaced Gold Islamic Knotwork Ring -->
+    <path
+        android:fillColor="#E2C472"
+        android:pathData="M23,23 L57,23 L57,57 L23,57 Z" />
+    <path
+        android:fillColor="#E2C472"
+        android:pathData="M40,15.9 L64.1,40 L40,64.1 L15.9,40 Z" />
+
+    <!-- Center Deep Emerald 8-Pointed Star Core -->
+    <path
+        android:fillColor="#05472A"
+        android:pathData="M27,27 L53,27 L53,53 L27,53 Z" />
+    <path
+        android:fillColor="#05472A"
+        android:pathData="M40,21.6 L58.4,40 L40,58.4 L21.6,40 Z" />
+
+    <!-- Innermost Gold Star Accent Ring -->
+    <path
+        android:fillColor="#D9B863"
+        android:pathData="M32,32 L48,32 L48,48 L32,48 Z" />
+    <path
+        android:fillColor="#D9B863"
+        android:pathData="M40,28.7 L51.3,40 L40,51.3 L28.7,40 Z" />
+
+    <!-- Center Emerald Jewel -->
+    <path
+        android:fillColor="#064E2E"
+        android:pathData="M34.5,34.5 L45.5,34.5 L45.5,45.5 L34.5,45.5 Z" />
+    <path
+        android:fillColor="#064E2E"
+        android:pathData="M40,32.2 L47.8,40 L40,47.8 L32.2,40 Z" />
+</vector>
