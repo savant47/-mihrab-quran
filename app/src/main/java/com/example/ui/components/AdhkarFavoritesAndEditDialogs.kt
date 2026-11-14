@@ -61,8 +61,70 @@ fun formatRepeatCountArabic(count: Int): String {
 }
 
 /**
+ * Compact Up (▲) and Down (▼) reorder buttons for moving any Dhikr or Chapter up/down in its list.
+ */
+@Composable
+fun DhikrOrderArrowsPill(
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFFEBE1C9).copy(alpha = 0.75f),
+        border = BorderStroke(0.7.dp, GoldBorder),
+        modifier = modifier
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = canMoveUp) { onMoveUp() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "تحريك لأعلى",
+                    tint = if (canMoveUp) EmeraldGreen else Color(0xFF1A110B).copy(alpha = 0.25f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(0.7.dp)
+                    .height(14.dp)
+                    .background(GoldBorder)
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = canMoveDown) { onMoveDown() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "تحريك لأسفل",
+                    tint = if (canMoveDown) EmeraldGreen else Color(0xFF1A110B).copy(alpha = 0.25f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
  * Dialog opened either on Long-Press of any Dhikr card (to edit text, change repeat count e.g. 1 -> 3,
- * delete the dhikr, or add a new dhikr to the same section) OR when clicking "+ إضافة ذكر يدوي جديد".
+ * reorder, delete the dhikr, or add a new dhikr to the same section) OR when clicking "+ إضافة ذكر يدوي جديد".
  */
 @Composable
 fun AddOrEditDhikrDialog(
@@ -74,6 +136,7 @@ fun AddOrEditDhikrDialog(
     initialArabicText: String = "",
     initialBenefit: String = "",
     initialTargetCount: Int = 3,
+    currentScopeKeys: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSaved: () -> Unit = {}
 ) {
@@ -93,6 +156,7 @@ fun AddOrEditDhikrDialog(
         mutableStateOf((if (mode == "edit") initialTargetCount else 3).coerceAtLeast(1).toString())
     }
     var alsoFavorite by remember { mutableStateOf(true) }
+    var insertAtStart by remember { mutableStateOf(false) }
 
     val quickCounts = listOf(1, 3, 7, 10, 33, 100)
 
@@ -109,10 +173,10 @@ fun AddOrEditDhikrDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (mode == "edit") "تعديل الذكر والتكرار أو الحذف" else "إضافة ذكر أو دعاء يدوي جديد",
+                        text = if (mode == "edit") "تعديل الذكر والترتيب والتكرار" else "إضافة ذكر أو دعاء يدوي جديد",
                         fontFamily = AmiriFontFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         color = EmeraldGreen
                     )
                 }
@@ -177,6 +241,156 @@ fun AddOrEditDhikrDialog(
                     fontWeight = FontWeight.Bold,
                     color = GoldAccent
                 )
+
+                // Quick Reorder Controls when editing an existing Dhikr
+                if (mode == "edit" && initialUniqueKey.isNotBlank() && currentScopeKeys.size > 1) {
+                    Text(
+                        text = "تغيير ترتيب الذكر في القائمة:",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = EmeraldGreen
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                AdhkarCustomizationManager.moveItemInScope(
+                                    context,
+                                    scopeKey,
+                                    currentScopeKeys,
+                                    initialUniqueKey,
+                                    -1
+                                )
+                                Toast.makeText(context, "تم تقديم الذكر خطوة لأعلى ⬆️", Toast.LENGTH_SHORT).show()
+                                onSaved()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, EmeraldGreen),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("لأعلى", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen, maxLines = 1, softWrap = false)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                AdhkarCustomizationManager.moveItemInScope(
+                                    context,
+                                    scopeKey,
+                                    currentScopeKeys,
+                                    initialUniqueKey,
+                                    +1
+                                )
+                                Toast.makeText(context, "تم تأخير الذكر خطوة لأسفل ⬇️", Toast.LENGTH_SHORT).show()
+                                onSaved()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, EmeraldGreen),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("لأسفل", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen, maxLines = 1, softWrap = false)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                AdhkarCustomizationManager.moveItemToEdgeInScope(
+                                    context,
+                                    scopeKey,
+                                    currentScopeKeys,
+                                    initialUniqueKey,
+                                    toStart = true
+                                )
+                                Toast.makeText(context, "تم نقل الذكر إلى بداية القائمة", Toast.LENGTH_SHORT).show()
+                                onSaved()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("الأول", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = GoldAccent, maxLines = 1, softWrap = false)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                AdhkarCustomizationManager.moveItemToEdgeInScope(
+                                    context,
+                                    scopeKey,
+                                    currentScopeKeys,
+                                    initialUniqueKey,
+                                    toStart = false
+                                )
+                                Toast.makeText(context, "تم نقل الذكر إلى نهاية القائمة", Toast.LENGTH_SHORT).show()
+                                onSaved()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, GoldAccent),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("الأخير", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = GoldAccent, maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+
+                // Placement Choice when Adding a New Dhikr (End of list vs Start of list)
+                if (mode == "add") {
+                    Text(
+                        text = "مكان إضافة الذكر الجديد:",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = EmeraldGreen
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (!insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
+                            border = BorderStroke(1.dp, if (!insertAtStart) EmeraldGreen else GoldBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { insertAtStart = false }
+                        ) {
+                            Text(
+                                text = "⬇️ في نهاية القائمة",
+                                color = if (!insertAtStart) Color.White else Color(0xFF1A110B),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
+                            border = BorderStroke(1.dp, if (insertAtStart) EmeraldGreen else GoldBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { insertAtStart = true }
+                        ) {
+                            Text(
+                                text = "⬆️ في بداية القائمة",
+                                color = if (insertAtStart) Color.White else Color(0xFF1A110B),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
+                            )
+                        }
+                    }
+                }
 
                 // 1. Repeat Count Section (Prominent at top so user can quickly change 1 -> 3 times)
                 Text(
@@ -348,7 +562,8 @@ fun AddOrEditDhikrDialog(
                             arabicText = cleanText,
                             benefit = benefitInput.trim(),
                             targetCount = targetRepeat,
-                            alsoAddToFavorites = alsoFavorite || scopeKey == "favorites"
+                            alsoAddToFavorites = alsoFavorite || scopeKey == "favorites",
+                            insertAtStart = insertAtStart
                         )
                         Toast.makeText(
                             context,
@@ -385,10 +600,10 @@ fun AddOrEditDhikrDialog(
  * Full-Screen Dialog for "الأذكار والأدعية المفضلة ❤️"
  * Accessible directly from the outside button below Hisn Al-Muslim Index, or from the heart icons.
  * Supports:
- * - Viewing all favorited Hisn Al-Muslim Chapters (أبواب مفضلة) & opening any chapter directly.
- * - Viewing all favorited Adhkar from across the entire app (Morning, Evening, Hisn Al-Muslim, Tasbeeh, Manual).
- * - Adding any custom manual Dhikr/Dua (read online, YouTube, TikTok, etc.) with custom repeat count.
- * - Long-pressing any Dhikr card to edit its text/repeat count or delete it.
+ * - Viewing & reordering all favorited Hisn Al-Muslim Chapters (أبواب مفضلة) & opening any chapter directly.
+ * - Viewing & reordering all favorited Adhkar from across the entire app (Morning, Evening, Hisn Al-Muslim, Tasbeeh, Manual).
+ * - Adding any custom manual Dhikr/Dua (read online, YouTube, TikTok, etc.) with custom repeat count and position.
+ * - Long-pressing any Dhikr card to edit its text/repeat count/order or delete it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -420,8 +635,9 @@ fun FavoriteAdhkarDialog(
     }
 
     val favoriteChapters = remember(customizationVersion, allHisnChapters) {
-        val favIds = AdhkarCustomizationManager.getFavoriteChapterIds(context)
-        allHisnChapters.filter { favIds.contains(it.id) }
+        val orderedIds = AdhkarCustomizationManager.getOrderedFavoriteChapterIds(context)
+        val byId = allHisnChapters.associateBy { it.id }
+        orderedIds.mapNotNull { byId[it] }
     }
 
     val favoriteItems = remember(customizationVersion, dailyResetTrigger) {
@@ -456,7 +672,7 @@ fun FavoriteAdhkarDialog(
             color = unifiedLightBg
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // 1. Top Ornate Header Bar
+                // 1. Top Ornate Header Bar (Clean, Non-Wrapping Layout)
                 Surface(
                     color = RoyalNavyDark,
                     modifier = Modifier.fillMaxWidth()
@@ -464,7 +680,7 @@ fun FavoriteAdhkarDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -477,7 +693,7 @@ fun FavoriteAdhkarDialog(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
+                                        .size(34.dp)
                                         .clip(CircleShape)
                                         .background(FavoriteHeartCrimson.copy(alpha = 0.14f))
                                         .border(1.dp, FavoriteHeartCrimson, CircleShape),
@@ -487,22 +703,24 @@ fun FavoriteAdhkarDialog(
                                         imageVector = Icons.Default.Favorite,
                                         contentDescription = null,
                                         tint = FavoriteHeartCrimson,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "الأذكار والأدعية المفضلة",
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 21.sp,
-                                        color = EmeraldGreen
+                                        fontSize = 18.sp,
+                                        color = EmeraldGreen,
+                                        maxLines = 1
                                     )
                                     Text(
-                                        text = "تصفير تلقائي يومياً 12:00 ص • اضغط مطولاً للتعديل أو الحذف",
-                                        fontSize = 11.sp,
-                                        color = darkInkText.copy(alpha = 0.78f)
+                                        text = "تصفير يومي 12:00 ص • رتب الأذكار بأسهم ▲▼",
+                                        fontSize = 10.5.sp,
+                                        color = darkInkText.copy(alpha = 0.78f),
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -539,19 +757,28 @@ fun FavoriteAdhkarDialog(
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldAccent),
                                     modifier = Modifier
-                                        .height(34.dp)
+                                        .height(32.dp)
                                         .testTag("reset_all_favorites_header_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = "تصفير المفضلة",
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text("تصفير الكل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "تصفير الكل",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
 
-                                IconButton(onClick = onDismiss) {
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "إغلاق المفضلة",
@@ -561,14 +788,14 @@ fun FavoriteAdhkarDialog(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         // Prominent Manual Add Dhikr Button ("+ إضافة ذكر يدوي جديد")
                         Button(
                             onClick = { showAddManualDialog = true },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(44.dp)
+                                .height(42.dp)
                                 .testTag("add_manual_dhikr_in_favorites_button"),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -581,13 +808,13 @@ fun FavoriteAdhkarDialog(
                                 imageVector = Icons.Default.AddCircleOutline,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "+ إضافة ذكر أو دعاء يدوي جديد (مع تحديد التكرار)",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp,
+                                fontSize = 12.sp,
                                 color = Color.White,
                                 maxLines = 1
                             )
@@ -606,18 +833,23 @@ fun FavoriteAdhkarDialog(
                     if (favoriteChapters.isNotEmpty()) {
                         item {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "📚 الأبواب المفضلة من حصن المسلم (${favoriteChapters.size}):",
+                                    text = "📚 الأبواب المفضلة (${favoriteChapters.size}):",
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    color = EmeraldGreen
+                                    fontSize = 16.5.sp,
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1
                                 )
-                                TextButton(
+                                Spacer(modifier = Modifier.width(8.dp))
+                                OutlinedButton(
                                     onClick = {
                                         val editor = prefs.edit()
                                         favoriteChapters.forEach { ch ->
@@ -629,21 +861,36 @@ fun FavoriteAdhkarDialog(
                                         dailyResetTrigger++
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         Toast.makeText(context, "تم تصفير عدادات الأبواب المفضلة", Toast.LENGTH_SHORT).show()
-                                    }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, GoldAccent),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp),
+                                    modifier = Modifier.height(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = null,
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تصفير الأبواب", fontSize = 11.5.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "تصفير الأبواب",
+                                        fontSize = 10.5.sp,
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                         }
 
-                        items(favoriteChapters, key = { "fav_ch_${it.id}_$dailyResetTrigger" }) { chapter ->
+                        items(
+                            count = favoriteChapters.size,
+                            key = { idx -> "fav_ch_${favoriteChapters[idx].id}_$dailyResetTrigger" }
+                        ) { chIndex ->
+                            val chapter = favoriteChapters[chIndex]
                             val completedInChap = chapter.duas.count { d ->
                                 prefs.getInt(d.uniqueKey, 0) >= d.targetCount
                             }
@@ -661,7 +908,7 @@ fun FavoriteAdhkarDialog(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        .padding(horizontal = 10.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -673,13 +920,13 @@ fun FavoriteAdhkarDialog(
                                             onClick = {
                                                 AdhkarCustomizationManager.toggleChapterFavorite(context, chapter.id)
                                             },
-                                            modifier = Modifier.size(34.dp)
+                                            modifier = Modifier.size(30.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Favorite,
                                                 contentDescription = "إزالة الباب من المفضلة",
                                                 tint = FavoriteHeartCrimson,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(19.dp)
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -688,22 +935,38 @@ fun FavoriteAdhkarDialog(
                                                 text = chapter.title,
                                                 fontFamily = AmiriFontFamily,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 18.sp,
+                                                fontSize = 17.sp,
                                                 color = darkInkText
                                             )
                                             Text(
-                                                text = "الباب رقم ${chapter.id} • إنجاز $completedInChap / ${chapter.duas.size} ذكر ودعاء",
-                                                fontSize = 11.sp,
+                                                text = "الباب رقم ${chapter.id} • إنجاز $completedInChap / ${chapter.duas.size}",
+                                                fontSize = 10.5.sp,
                                                 color = EmeraldGreen,
-                                                fontWeight = FontWeight.SemiBold
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
                                             )
                                         }
                                     }
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
+                                        if (favoriteChapters.size > 1) {
+                                            DhikrOrderArrowsPill(
+                                                canMoveUp = chIndex > 0,
+                                                canMoveDown = chIndex < favoriteChapters.lastIndex,
+                                                onMoveUp = {
+                                                    AdhkarCustomizationManager.moveFavoriteChapter(context, chapter.id, -1)
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onMoveDown = {
+                                                    AdhkarCustomizationManager.moveFavoriteChapter(context, chapter.id, +1)
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                            )
+                                        }
+
                                         IconButton(
                                             onClick = {
                                                 val editor = prefs.edit()
@@ -715,13 +978,13 @@ fun FavoriteAdhkarDialog(
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 Toast.makeText(context, "تم تصفير باب «${chapter.title}»", Toast.LENGTH_SHORT).show()
                                             },
-                                            modifier = Modifier.size(32.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Refresh,
                                                 contentDescription = "تصفير الباب",
                                                 tint = GoldAccent,
-                                                modifier = Modifier.size(18.dp)
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
 
@@ -730,11 +993,13 @@ fun FavoriteAdhkarDialog(
                                             color = EmeraldGreen
                                         ) {
                                             Text(
-                                                text = "فتح الباب",
+                                                text = "فتح",
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 11.sp,
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                                             )
                                         }
                                     }
@@ -748,22 +1013,27 @@ fun FavoriteAdhkarDialog(
                         }
                     }
 
-                    // Favorite Individual & Manual Adhkar Section
+                    // Favorite Individual & Manual Adhkar Section (Fixed non-wrapping header!)
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "📿 الأذكار والأدعية المفضلة واليدوية (${favoriteItems.size}):",
+                                text = "📿 الأذكار المفضلة واليدوية (${favoriteItems.size}):",
                                 fontFamily = AmiriFontFamily,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = EmeraldGreen
+                                fontSize = 16.5.sp,
+                                color = EmeraldGreen,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
                             )
                             if (favoriteItems.isNotEmpty()) {
-                                TextButton(
+                                Spacer(modifier = Modifier.width(8.dp))
+                                OutlinedButton(
                                     onClick = {
                                         val editor = prefs.edit()
                                         favoriteItems.forEach { item ->
@@ -772,17 +1042,28 @@ fun FavoriteAdhkarDialog(
                                             editor.putInt(item.uniqueKey, 0)
                                         }
                                         editor.apply()
-                                        Toast.makeText(context, "تم تصفير عدادات المفضلة", Toast.LENGTH_SHORT).show()
-                                    }
+                                        Toast.makeText(context, "تم تصفير عدادات الأذكار المفضلة", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, GoldAccent),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp),
+                                    modifier = Modifier.height(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = null,
                                         tint = GoldAccent,
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تصفير الكل", fontSize = 11.5.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "تصفير الأذكار",
+                                        fontSize = 10.5.sp,
+                                        color = GoldAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                         }
@@ -820,7 +1101,7 @@ fun FavoriteAdhkarDialog(
                                         textAlign = TextAlign.Center
                                     )
                                     Text(
-                                        text = "يمكنك الضغط على علامة القلب (❤️) بجانب أي ذكر أو باب في التطبيق لإضافته هنا، أو الضغط على زر «+ إضافة ذكر أو دعاء يدوي جديد» بالأعلى لإضافة أي ذكر قرأته أو سمعته مع تحديد عدد مرات تكراره.",
+                                        text = "يمكنك الضغط على علامة القلب (❤️) بجانب أي ذكر أو باب في التطبيق لإضافته هنا، أو الضغط على زر «+ إضافة ذكر أو دعاء يدوي جديد» بالأعلى لإضافة أي ذكر قرأته أو سمعته مع تحديد عدد مرات تكراره وترتيبه.",
                                         fontSize = 12.5.sp,
                                         color = darkInkText.copy(alpha = 0.8f),
                                         textAlign = TextAlign.Center,
@@ -831,7 +1112,13 @@ fun FavoriteAdhkarDialog(
                         }
                     }
 
-                    items(favoriteItems, key = { "fav_item_${it.uniqueKey}" }) { item ->
+                    val allFavKeys = favoriteItems.map { it.uniqueKey }
+
+                    items(
+                        count = favoriteItems.size,
+                        key = { idx -> "fav_item_${favoriteItems[idx].uniqueKey}" }
+                    ) { itemIdx ->
+                        val item = favoriteItems[itemIdx]
                         val currentCount = counts[item.uniqueKey] ?: 0
                         val isCompleted = currentCount >= item.targetCount
 
@@ -869,7 +1156,7 @@ fun FavoriteAdhkarDialog(
                                     .fillMaxWidth()
                                     .padding(14.dp)
                             ) {
-                                // Top Row: Heart Button + Title/Category + Edit Button + Target Repeat Badge
+                                // Top Row: Heart Button + Title/Category + Up/Down Reorder + Edit Button + Target Repeat Badge
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -884,13 +1171,13 @@ fun FavoriteAdhkarDialog(
                                                 AdhkarCustomizationManager.toggleDhikrFavorite(context, item)
                                                 Toast.makeText(context, "تمت إزالة الذكر من المفضلة", Toast.LENGTH_SHORT).show()
                                             },
-                                            modifier = Modifier.size(32.dp)
+                                            modifier = Modifier.size(30.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Favorite,
                                                 contentDescription = "إزالة من المفضلة",
                                                 tint = FavoriteHeartCrimson,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(19.dp)
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(4.dp))
@@ -898,15 +1185,17 @@ fun FavoriteAdhkarDialog(
                                             Text(
                                                 text = item.title.ifBlank { item.categoryTitle },
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = EmeraldGreen
+                                                fontSize = 13.5.sp,
+                                                color = EmeraldGreen,
+                                                maxLines = 1
                                             )
                                             if (item.categoryTitle.isNotBlank() && item.categoryTitle != item.title) {
                                                 Text(
                                                     text = item.categoryTitle,
-                                                    fontSize = 11.sp,
+                                                    fontSize = 10.5.sp,
                                                     color = GoldAccent,
-                                                    fontWeight = FontWeight.SemiBold
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1
                                                 )
                                             }
                                         }
@@ -914,8 +1203,35 @@ fun FavoriteAdhkarDialog(
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
+                                        if (favoriteItems.size > 1) {
+                                            DhikrOrderArrowsPill(
+                                                canMoveUp = itemIdx > 0,
+                                                canMoveDown = itemIdx < favoriteItems.lastIndex,
+                                                onMoveUp = {
+                                                    AdhkarCustomizationManager.moveItemInScope(
+                                                        context,
+                                                        "favorites",
+                                                        allFavKeys,
+                                                        item.uniqueKey,
+                                                        -1
+                                                    )
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onMoveDown = {
+                                                    AdhkarCustomizationManager.moveItemInScope(
+                                                        context,
+                                                        "favorites",
+                                                        allFavKeys,
+                                                        item.uniqueKey,
+                                                        +1
+                                                    )
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                            )
+                                        }
+
                                         // Quick Edit Icon (also triggered by Long-Press)
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
@@ -926,21 +1242,23 @@ fun FavoriteAdhkarDialog(
                                                 .clickable { editingItem = item }
                                         ) {
                                             Row(
-                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Edit,
                                                     contentDescription = "تعديل الذكر والتكرار",
                                                     tint = GoldAccent,
-                                                    modifier = Modifier.size(13.dp)
+                                                    modifier = Modifier.size(12.dp)
                                                 )
-                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Spacer(modifier = Modifier.width(2.dp))
                                                 Text(
                                                     text = "تعديل",
-                                                    fontSize = 10.5.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = darkInkText
+                                                    color = darkInkText,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
@@ -953,8 +1271,10 @@ fun FavoriteAdhkarDialog(
                                                 text = formatRepeatCountArabic(item.targetCount),
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 11.5.sp,
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             )
                                         }
                                     }
@@ -1040,7 +1360,7 @@ fun FavoriteAdhkarDialog(
 
                                     OutlinedIconButton(
                                         onClick = {
-                                            val shareText = "${item.title}\n\n${item.arabicText}\n\n— تطبيق محرابي"
+                                            val shareText = "${item.title}\n\n${item.arabicText}"
                                             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                                 type = "text/plain"
                                                 putExtra(Intent.EXTRA_TEXT, shareText)
@@ -1089,6 +1409,7 @@ fun FavoriteAdhkarDialog(
             isEditMode = false,
             scopeKey = "favorites",
             categoryTitle = "الأذكار والأدعية المفضلة",
+            currentScopeKeys = favoriteItems.map { it.uniqueKey },
             onDismiss = { showAddManualDialog = false }
         )
     }
@@ -1096,13 +1417,14 @@ fun FavoriteAdhkarDialog(
     editingItem?.let { target ->
         AddOrEditDhikrDialog(
             isEditMode = true,
-            scopeKey = target.scopeKey,
+            scopeKey = "favorites",
             categoryTitle = target.categoryTitle.ifBlank { "الأذكار المفضلة" },
             initialUniqueKey = target.uniqueKey,
             initialTitle = target.title,
             initialArabicText = target.arabicText,
             initialBenefit = target.benefit,
             initialTargetCount = target.targetCount,
+            currentScopeKeys = favoriteItems.map { it.uniqueKey },
             onDismiss = { editingItem = null }
         )
     }

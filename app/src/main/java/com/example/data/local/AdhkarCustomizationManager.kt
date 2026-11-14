@@ -39,9 +39,11 @@ object AdhkarCustomizationManager {
 
     private const val KEY_FAVORITE_ITEMS_JSON = "favorite_items_json_v1"
     private const val KEY_FAVORITE_CHAPTER_IDS = "favorite_chapter_ids_v1"
+    private const val KEY_FAVORITE_CHAPTER_ORDER_JSON = "favorite_chapter_order_json_v1"
     private const val KEY_OVERRIDES_JSON = "dhikr_overrides_json_v1"
     private const val KEY_DELETED_KEYS = "deleted_dhikr_keys_v1"
     private const val KEY_CUSTOM_ADDED_JSON = "custom_added_adhkar_json_v1"
+    private const val KEY_SCOPE_ORDER_JSON = "scope_custom_order_json_v1"
 
     private val _versionFlow = MutableStateFlow(0)
     val versionFlow: StateFlow<Int> = _versionFlow.asStateFlow()
@@ -52,6 +54,137 @@ object AdhkarCustomizationManager {
 
     private fun prefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    // =========================================================================
+    // 0. Custom Ordering & Reordering (Move Up / Down / Top / Bottom in any section)
+    // =========================================================================
+
+    fun getScopeOrderList(context: Context, scopeKey: String): List<String> {
+        val raw = prefs(context).getString(KEY_SCOPE_ORDER_JSON, null) ?: return emptyList()
+        return try {
+            val root = JSONObject(raw)
+            val arr = root.optJSONArray(scopeKey) ?: return emptyList()
+            val result = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val k = arr.optString(i, "")
+                if (k.isNotBlank()) result.add(k)
+            }
+            result
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveScopeOrderList(context: Context, scopeKey: String, orderedKeys: List<String>) {
+        val raw = prefs(context).getString(KEY_SCOPE_ORDER_JSON, null)
+        val root = try {
+            if (raw != null) JSONObject(raw) else JSONObject()
+        } catch (_: Exception) {
+            JSONObject()
+        }
+        val arr = JSONArray()
+        orderedKeys.distinct().forEach { arr.put(it) }
+        root.put(scopeKey, arr)
+        prefs(context).edit().putString(KEY_SCOPE_ORDER_JSON, root.toString()).apply()
+    }
+
+    fun <T> applyScopeOrder(
+        context: Context,
+        scopeKey: String,
+        items: List<T>,
+        keySelector: (T) -> String
+    ): List<T> {
+        val savedOrder = getScopeOrderList(context, scopeKey)
+        if (savedOrder.isEmpty()) return items
+        val indexMap = savedOrder.withIndex().associate { it.value to it.index }
+        val inSaved = mutableListOf<Pair<Int, T>>()
+        val notInSaved = mutableListOf<T>()
+        items.forEach { item ->
+            val k = keySelector(item)
+            val idx = indexMap[k]
+            if (idx != null) {
+                inSaved.add(idx to item)
+            } else {
+                notInSaved.add(item)
+            }
+        }
+        inSaved.sortBy { it.first }
+        return inSaved.map { it.second } + notInSaved
+    }
+
+    /**
+     * Moves an item up (`direction = -1`) or down (`direction = +1`) within `currentOrderedKeys` for `scopeKey`.
+     */
+    fun moveItemInScope(
+        context: Context,
+        scopeKey: String,
+        currentOrderedKeys: List<String>,
+        targetKey: String,
+        direction: Int
+    ): Boolean {
+        val list = currentOrderedKeys.toMutableList()
+        val idx = list.indexOf(targetKey)
+        if (idx < 0) return false
+        val newIdx = idx + direction
+        if (newIdx !in list.indices) return false
+        val temp = list[idx]
+        list[idx] = list[newIdx]
+        list[newIdx] = temp
+        saveScopeOrderList(context, scopeKey, list)
+
+        if (scopeKey == "favorites") {
+            val favs = getFavoriteItemsRawOrdered(context, list)
+            persistFavoriteItems(context, favs)
+        }
+        notifyUpdated()
+        return true
+    }
+
+    /**
+     * Moves an item directly to the start (`toStart = true`) or end (`toStart = false`) of `scopeKey`.
+     */
+    fun moveItemToEdgeInScope(
+        context: Context,
+        scopeKey: String,
+        currentOrderedKeys: List<String>,
+        targetKey: String,
+        toStart: Boolean
+    ): Boolean {
+        val list = currentOrderedKeys.toMutableList()
+        val idx = list.indexOf(targetKey)
+        if (idx < 0) return false
+        if (toStart && idx == 0) return false
+        if (!toStart && idx == list.lastIndex) return false
+        list.removeAt(idx)
+        if (toStart) {
+            list.add(0, targetKey)
+        } else {
+            list.add(targetKey)
+        }
+        saveScopeOrderList(context, scopeKey, list)
+
+        if (scopeKey == "favorites") {
+            val favs = getFavoriteItemsRawOrdered(context, list)
+            persistFavoriteItems(context, favs)
+        }
+        notifyUpdated()
+        return true
+    }
+
+    private fun getFavoriteItemsRawOrdered(context: Context, orderedKeys: List<String>): List<UnifiedDhikrItem> {
+        val current = getFavoriteItems(context)
+        val byKey = current.associateBy { it.uniqueKey }
+        val result = mutableListOf<UnifiedDhikrItem>()
+        orderedKeys.forEach { k ->
+            byKey[k]?.let { result.add(it) }
+        }
+        current.forEach { item ->
+            if (result.none { it.uniqueKey == item.uniqueKey }) {
+                result.add(item)
+            }
+        }
+        return result
     }
 
     // =========================================================================
@@ -226,7 +359,8 @@ object AdhkarCustomizationManager {
         arabicText: String,
         benefit: String,
         targetCount: Int,
-        alsoAddToFavorites: Boolean = true
+        alsoAddToFavorites: Boolean = true,
+        insertAtStart: Boolean = false
     ): UnifiedDhikrItem {
         val cleanText = arabicText.trim()
         val cleanTitle = title.trim().ifBlank { "ذكر ودعاء مضاف" }
@@ -243,14 +377,34 @@ object AdhkarCustomizationManager {
         )
 
         val current = getCustomAddedAdhkar(context).toMutableList()
-        current.add(0, newItem)
+        if (insertAtStart) {
+            current.add(0, newItem)
+        } else {
+            current.add(newItem)
+        }
         persistCustomAddedAdhkar(context, current)
+
+        // Also update the saved scope order if one exists or if insertAtStart is specified
+        val existingOrder = getScopeOrderList(context, scopeKey).toMutableList()
+        if (existingOrder.isNotEmpty()) {
+            if (insertAtStart) {
+                existingOrder.add(0, newItem.uniqueKey)
+            } else {
+                existingOrder.add(newItem.uniqueKey)
+            }
+            saveScopeOrderList(context, scopeKey, existingOrder)
+        }
 
         if (alsoAddToFavorites || scopeKey == "favorites") {
             val favs = getFavoriteItems(context).toMutableList()
             if (favs.none { it.uniqueKey == newItem.uniqueKey }) {
-                favs.add(0, newItem)
+                if (insertAtStart) {
+                    favs.add(0, newItem)
+                } else {
+                    favs.add(newItem)
+                }
                 persistFavoriteItems(context, favs)
+                saveScopeOrderList(context, "favorites", favs.map { it.uniqueKey })
             }
         }
 
@@ -307,7 +461,7 @@ object AdhkarCustomizationManager {
             }
         } catch (_: Exception) {
         }
-        return list
+        return applyScopeOrder(context, "favorites", list) { it.uniqueKey }
     }
 
     fun isDhikrFavorite(context: Context, uniqueKey: String): Boolean {
@@ -321,10 +475,11 @@ object AdhkarCustomizationManager {
             current.removeAt(existingIdx)
             false
         } else {
-            current.add(0, item)
+            current.add(item)
             true
         }
         persistFavoriteItems(context, current)
+        saveScopeOrderList(context, "favorites", current.map { it.uniqueKey })
         notifyUpdated()
         return nowFav
     }
@@ -352,22 +507,69 @@ object AdhkarCustomizationManager {
         return rawSet.mapNotNull { it.toIntOrNull() }.toSet()
     }
 
+    fun getOrderedFavoriteChapterIds(context: Context): List<Int> {
+        val set = getFavoriteChapterIds(context)
+        if (set.isEmpty()) return emptyList()
+        val rawOrder = prefs(context).getString(KEY_FAVORITE_CHAPTER_ORDER_JSON, null)
+        val savedOrder = mutableListOf<Int>()
+        if (rawOrder != null) {
+            try {
+                val arr = JSONArray(rawOrder)
+                for (i in 0 until arr.length()) {
+                    val id = arr.optInt(i, -1)
+                    if (id > 0 && set.contains(id)) {
+                        savedOrder.add(id)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        val remaining = set.filter { !savedOrder.contains(it) }.sorted()
+        return savedOrder + remaining
+    }
+
+    private fun saveOrderedFavoriteChapterIds(context: Context, orderedIds: List<Int>) {
+        val arr = JSONArray()
+        orderedIds.distinct().forEach { arr.put(it) }
+        prefs(context).edit()
+            .putString(KEY_FAVORITE_CHAPTER_ORDER_JSON, arr.toString())
+            .apply()
+    }
+
+    fun moveFavoriteChapter(context: Context, chapterId: Int, direction: Int): Boolean {
+        val ordered = getOrderedFavoriteChapterIds(context).toMutableList()
+        val idx = ordered.indexOf(chapterId)
+        if (idx < 0) return false
+        val newIdx = idx + direction
+        if (newIdx !in ordered.indices) return false
+        val tmp = ordered[idx]
+        ordered[idx] = ordered[newIdx]
+        ordered[newIdx] = tmp
+        saveOrderedFavoriteChapterIds(context, ordered)
+        notifyUpdated()
+        return true
+    }
+
     fun isChapterFavorite(context: Context, chapterId: Int): Boolean {
         return getFavoriteChapterIds(context).contains(chapterId)
     }
 
     fun toggleChapterFavorite(context: Context, chapterId: Int): Boolean {
         val current = getFavoriteChapterIds(context).toMutableSet()
+        val ordered = getOrderedFavoriteChapterIds(context).toMutableList()
         val added = if (current.contains(chapterId)) {
             current.remove(chapterId)
+            ordered.remove(chapterId)
             false
         } else {
             current.add(chapterId)
+            if (!ordered.contains(chapterId)) ordered.add(chapterId)
             true
         }
         prefs(context).edit()
             .putStringSet(KEY_FAVORITE_CHAPTER_IDS, current.map { it.toString() }.toSet())
             .apply()
+        saveOrderedFavoriteChapterIds(context, ordered)
         notifyUpdated()
         return added
     }

@@ -148,7 +148,14 @@ object HisnAlMuslimRepository {
                     }
                 }
 
-            val combined = (chapterCustomDuas + modifiedBuiltIn).mapIndexed { index, entry ->
+            val rawCombined = modifiedBuiltIn + chapterCustomDuas
+            val orderedCombined = AdhkarCustomizationManager.applyScopeOrder(
+                context = context,
+                scopeKey = scopeKey,
+                items = rawCombined,
+                keySelector = { it.uniqueKey }
+            )
+            val combined = orderedCombined.mapIndexed { index, entry ->
                 entry.copy(idInChapter = index + 1)
             }
             ch.copy(duas = combined)
@@ -961,11 +968,13 @@ fun HisnAlMuslimCompleteDialog(
             isEditMode = false,
             scopeKey = "hisn_ch_${activeChapter.id}",
             categoryTitle = activeChapter.title,
+            currentScopeKeys = activeChapter.duas.map { it.uniqueKey },
             onDismiss = { showAddDhikrInActiveChapter = false }
         )
     }
 
     editingDuaEntry?.let { target ->
+        val chapterDuasKeys = allChapters.find { it.id == target.categoryId }?.duas?.map { it.uniqueKey } ?: emptyList()
         AddOrEditDhikrDialog(
             isEditMode = true,
             scopeKey = "hisn_ch_${target.categoryId}",
@@ -975,6 +984,7 @@ fun HisnAlMuslimCompleteDialog(
             initialArabicText = target.arabicText,
             initialBenefit = target.benefit,
             initialTargetCount = target.targetCount,
+            currentScopeKeys = chapterDuasKeys,
             onDismiss = { editingDuaEntry = null }
         )
     }
@@ -1165,6 +1175,9 @@ private fun HisnChapterDetailView(
                 val currentCount = counts[dua.uniqueKey] ?: 0
                 val isCompleted = currentCount >= dua.targetCount
                 val isFav = favoriteItemKeys.contains(dua.uniqueKey)
+                val duaIndex = chapter.duas.indexOfFirst { it.uniqueKey == dua.uniqueKey }
+                val chapterScopeKey = "hisn_ch_${chapter.id}"
+                val allChapterKeys = chapter.duas.map { it.uniqueKey }
 
                 Card(
                     modifier = Modifier
@@ -1200,13 +1213,16 @@ private fun HisnChapterDetailView(
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        // Top Row: Heart Favorite Icon + Number badge + Edit chip + Target Count badge
+                        // Top Row: Heart Favorite Icon + Number badge + Up/Down Order + Edit chip + Target Count badge
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 // Heart Button to Favorite/Unfavorite this individual Dhikr
                                 IconButton(
                                     onClick = {
@@ -1255,14 +1271,43 @@ private fun HisnChapterDetailView(
                                     text = "الذكر (${dua.idInChapter})",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.5.sp,
-                                    color = EmeraldGreen
+                                    color = EmeraldGreen,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
+                                if (chapter.duas.size > 1 && duaIndex >= 0) {
+                                    DhikrOrderArrowsPill(
+                                        canMoveUp = duaIndex > 0,
+                                        canMoveDown = duaIndex < chapter.duas.lastIndex,
+                                        onMoveUp = {
+                                            AdhkarCustomizationManager.moveItemInScope(
+                                                context = context,
+                                                scopeKey = chapterScopeKey,
+                                                currentOrderedKeys = allChapterKeys,
+                                                targetKey = dua.uniqueKey,
+                                                direction = -1
+                                            )
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onMoveDown = {
+                                            AdhkarCustomizationManager.moveItemInScope(
+                                                context = context,
+                                                scopeKey = chapterScopeKey,
+                                                currentOrderedKeys = allChapterKeys,
+                                                targetKey = dua.uniqueKey,
+                                                direction = 1
+                                            )
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        }
+                                    )
+                                }
+
                                 // Edit / Repeat Count Chip (also triggered on Long-Press)
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -1399,7 +1444,7 @@ private fun HisnChapterDetailView(
                                         append("━━━━━━━━━━━━━━━━━━\n")
                                         append("${dua.arabicText}\n")
                                         append("━━━━━━━━━━━━━━━━━━\n")
-                                        append("تطبيق محرابي | إعداد: آسر الشربيني • وقفٌ لله تعالى وصدقةٌ جارية عني وعن والديّ")
+                                        append("تطبيق محرابي")
                                     }
                                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "text/plain"

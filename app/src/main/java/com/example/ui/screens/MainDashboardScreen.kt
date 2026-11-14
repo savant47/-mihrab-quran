@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Share
 import com.example.data.local.AdhkarCustomizationManager
 import com.example.data.local.UnifiedDhikrItem
 import com.example.ui.components.AddOrEditDhikrDialog
+import com.example.ui.components.DhikrOrderArrowsPill
 import com.example.ui.components.FavoriteHeartCrimson
 import android.Manifest
 import android.content.pm.PackageManager
@@ -2552,7 +2553,13 @@ fun TasbeehSection() {
                 }
             }
 
-        customMapped + builtInMapped
+        val rawCombined = builtInMapped + customMapped
+        AdhkarCustomizationManager.applyScopeOrder(
+            context = context,
+            scopeKey = "tasbeeh",
+            items = rawCombined,
+            keySelector = { it.key }
+        )
     }
 
     val favoriteItemKeys = remember(customizationVersion) {
@@ -2709,9 +2716,10 @@ fun TasbeehSection() {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Adhkar Clickable Buttons (Tap = +1, Long-Press = Edit text / repeat count / delete, Heart = Favorite)
+            // Adhkar Clickable Buttons (Tap = +1, Long-Press = Edit text / repeat count / delete, Heart = Favorite, Up/Down = Reorder)
+            val allTasbeehKeys = adhkarList.map { it.key }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                adhkarList.forEach { dhikr ->
+                adhkarList.forEachIndexed { index, dhikr ->
                     val count = counts[dhikr.key] ?: 0
                     val isTargetReached = count >= dhikr.target
                     val isFav = favoriteItemKeys.contains(dhikr.key)
@@ -2751,7 +2759,7 @@ fun TasbeehSection() {
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
-                            // Top Row: Heart Favorite Icon + Full-Width Dhikr Text + Quick Edit Icon
+                            // Top Row: Heart Favorite Icon + Full-Width Dhikr Text + Up/Down Reorder Pill + Quick Edit Icon
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
@@ -2797,6 +2805,34 @@ fun TasbeehSection() {
                                     fontWeight = FontWeight.Bold,
                                     color = if (isTargetReached) EmeraldGreen else MaterialTheme.colorScheme.onSurface
                                 )
+
+                                if (adhkarList.size > 1) {
+                                    DhikrOrderArrowsPill(
+                                        canMoveUp = index > 0,
+                                        canMoveDown = index < adhkarList.lastIndex,
+                                        onMoveUp = {
+                                            AdhkarCustomizationManager.moveItemInScope(
+                                                context = context,
+                                                scopeKey = "tasbeeh",
+                                                currentOrderedKeys = allTasbeehKeys,
+                                                targetKey = dhikr.key,
+                                                direction = -1
+                                            )
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onMoveDown = {
+                                            AdhkarCustomizationManager.moveItemInScope(
+                                                context = context,
+                                                scopeKey = "tasbeeh",
+                                                currentOrderedKeys = allTasbeehKeys,
+                                                targetKey = dhikr.key,
+                                                direction = 1
+                                            )
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
 
                                 IconButton(
                                     onClick = { editingTasbeeh = dhikr },
@@ -2930,6 +2966,7 @@ fun TasbeehSection() {
             scopeKey = "tasbeeh",
             categoryTitle = "عداد التسبيح والأذكار",
             initialTargetCount = 33,
+            currentScopeKeys = adhkarList.map { it.key },
             onDismiss = { showAddTasbeehDialog = false }
         )
     }
@@ -2944,6 +2981,7 @@ fun TasbeehSection() {
             initialArabicText = target.text,
             initialBenefit = "",
             initialTargetCount = target.target,
+            currentScopeKeys = adhkarList.map { it.key },
             onDismiss = { editingTasbeeh = null }
         )
     }

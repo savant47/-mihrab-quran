@@ -57,13 +57,9 @@ const val WAQF_LINE_2 = "اللهم اغفر لأبي وارحمه، وأدم ع
 
 fun shareSpiritualMessage(context: Context, message: SpiritualMessageItem) {
     val shareBody = buildString {
-        append("🕊️✉️ رسالة إيمانية من تطبيق محرابي\n")
-        append("━━━━━━━━━━━━━━━━━━\n")
         append("✨ ${message.categoryTitle}\n\n")
         append("${message.arabicText}\n\n")
-        append("📚 المصدر: ${message.sourceReference}\n")
-        append("━━━━━━━━━━━━━━━━━━\n")
-        append("$WAQF_LINE_1\n$WAQF_LINE_2")
+        append("📚 المصدر: ${message.sourceReference}")
     }
     val sendIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"

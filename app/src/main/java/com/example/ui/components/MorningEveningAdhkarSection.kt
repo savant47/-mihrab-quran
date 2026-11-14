@@ -506,7 +506,8 @@ object AuthenticAdhkarData {
                 }
             }
 
-        return customMapped + builtInMapped
+        val combined = builtInMapped + customMapped
+        return AdhkarCustomizationManager.applyScopeOrder(context, trackType, combined) { it.id }
     }
 
     val morningAdhkar: List<HisnDhikrItem> = listOf(
@@ -1507,6 +1508,8 @@ private fun AdhkarReaderDialog(
                     }
                 }
 
+                val allScopeKeys = items.map { it.id }
+
                 // Adhkar Cards List
                 LazyColumn(
                     modifier = Modifier
@@ -1514,7 +1517,11 @@ private fun AdhkarReaderDialog(
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(items, key = { it.id }) { item ->
+                    items(
+                        count = items.size,
+                        key = { idx -> items[idx].id }
+                    ) { itemIdx ->
+                        val item = items[itemIdx]
                         val currentCount = counts[item.id] ?: 0
                         val isDone = currentCount >= item.targetCount
                         val isFav = favoriteItemKeys.contains(item.id)
@@ -1556,7 +1563,7 @@ private fun AdhkarReaderDialog(
                                     .fillMaxWidth()
                                     .padding(16.dp)
                             ) {
-                                // Title + Heart Favorite Icon + Edit Chip + Target Badge
+                                // Title + Heart Favorite Icon + Up/Down Reorder + Edit Chip + Target Badge
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1587,13 +1594,13 @@ private fun AdhkarReaderDialog(
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             },
-                                            modifier = Modifier.size(34.dp)
+                                            modifier = Modifier.size(30.dp)
                                         ) {
                                             Icon(
                                                 imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                                 contentDescription = "إضافة للمفضلة",
                                                 tint = if (isFav) FavoriteHeartCrimson else GoldAccent,
-                                                modifier = Modifier.size(21.dp)
+                                                modifier = Modifier.size(19.dp)
                                             )
                                         }
 
@@ -1604,23 +1611,52 @@ private fun AdhkarReaderDialog(
                                                 imageVector = Icons.Default.CheckCircle,
                                                 contentDescription = null,
                                                 tint = EmeraldGreen,
-                                                modifier = Modifier.size(19.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
                                         }
                                         Text(
                                             text = item.title,
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
+                                            fontSize = 14.5.sp,
                                             color = if (isDone) EmeraldGreen else GoldAccent,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1
                                         )
                                     }
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
+                                        if (items.size > 1) {
+                                            DhikrOrderArrowsPill(
+                                                canMoveUp = itemIdx > 0,
+                                                canMoveDown = itemIdx < items.lastIndex,
+                                                onMoveUp = {
+                                                    AdhkarCustomizationManager.moveItemInScope(
+                                                        context,
+                                                        trackType,
+                                                        allScopeKeys,
+                                                        item.id,
+                                                        -1
+                                                    )
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onMoveDown = {
+                                                    AdhkarCustomizationManager.moveItemInScope(
+                                                        context,
+                                                        trackType,
+                                                        allScopeKeys,
+                                                        item.id,
+                                                        +1
+                                                    )
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                            )
+                                        }
+
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
                                             color = Color(0xFFEBE1C9),
@@ -1630,21 +1666,23 @@ private fun AdhkarReaderDialog(
                                                 .clickable { editingItem = item }
                                         ) {
                                             Row(
-                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Edit,
                                                     contentDescription = "تعديل الذكر والتكرار",
                                                     tint = GoldAccent,
-                                                    modifier = Modifier.size(13.dp)
+                                                    modifier = Modifier.size(12.dp)
                                                 )
-                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Spacer(modifier = Modifier.width(2.dp))
                                                 Text(
                                                     text = "تعديل",
-                                                    fontSize = 10.5.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF1A110B)
+                                                    color = Color(0xFF1A110B),
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
@@ -1655,10 +1693,12 @@ private fun AdhkarReaderDialog(
                                         ) {
                                             Text(
                                                 text = formatRepeatCountArabic(item.targetCount),
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                                 color = if (isDone) Color.White else EmeraldGreen,
                                                 fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -1757,6 +1797,7 @@ private fun AdhkarReaderDialog(
             isEditMode = false,
             scopeKey = trackType,
             categoryTitle = title,
+            currentScopeKeys = items.map { it.id },
             onDismiss = { showAddDhikrDialog = false }
         )
     }
@@ -1771,6 +1812,7 @@ private fun AdhkarReaderDialog(
             initialArabicText = target.arabicText,
             initialBenefit = target.benefit,
             initialTargetCount = target.targetCount,
+            currentScopeKeys = items.map { it.id },
             onDismiss = { editingItem = null }
         )
     }
