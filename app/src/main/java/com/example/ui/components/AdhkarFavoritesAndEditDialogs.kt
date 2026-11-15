@@ -155,8 +155,50 @@ fun AddOrEditDhikrDialog(
     var countInput by remember(mode) {
         mutableStateOf((if (mode == "edit") initialTargetCount else 3).coerceAtLeast(1).toString())
     }
-    var alsoFavorite by remember { mutableStateOf(true) }
     var insertAtStart by remember { mutableStateOf(false) }
+
+    // Multi-destination selection state (Morning, Evening, Tasbeeh, Favorites, or any of the 132 Hisn Al-Muslim chapters)
+    val allHisnChapters = remember {
+        HisnAlMuslimRepository.getChapters(context)
+    }
+    val selectedTargetScopes = remember(mode, scopeKey) {
+        mutableStateListOf<String>().apply {
+            if (mode == "add") {
+                add(scopeKey)
+                if (scopeKey != "favorites") {
+                    add("favorites")
+                }
+            }
+        }
+    }
+    var showHisnChapterPicker by remember { mutableStateOf(false) }
+    var hisnChapterSearchQuery by remember { mutableStateOf("") }
+
+    val filteredHisnChapters = remember(allHisnChapters, hisnChapterSearchQuery) {
+        val q = hisnChapterSearchQuery.trim()
+        if (q.isEmpty()) {
+            allHisnChapters
+        } else {
+            allHisnChapters.filter { ch ->
+                ch.title.contains(q, ignoreCase = true) || ch.id.toString() == q
+            }
+        }
+    }
+
+    fun resolveScopeLabel(targetScope: String): String {
+        return when {
+            targetScope == "morning" -> "أذكار الصباح المباركة"
+            targetScope == "evening" -> "أذكار المساء المباركة"
+            targetScope == "tasbeeh" -> "عداد التسبيح والأذكار"
+            targetScope == "favorites" -> "الأذكار والأدعية المفضلة"
+            targetScope.startsWith("hisn_ch_") -> {
+                val chId = targetScope.removePrefix("hisn_ch_").toIntOrNull()
+                val ch = allHisnChapters.find { it.id == chId }
+                ch?.title ?: categoryTitle
+            }
+            else -> categoryTitle
+        }
+    }
 
     val quickCounts = listOf(1, 3, 7, 10, 33, 100)
 
@@ -173,10 +215,10 @@ fun AddOrEditDhikrDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (mode == "edit") "تعديل الذكر والترتيب والتكرار" else "إضافة ذكر أو دعاء يدوي جديد",
+                        text = if (mode == "edit") "تعديل الذكر أو إضافته لباب آخر" else "إضافة ذكر أو دعاء يدوي جديد",
                         fontFamily = AmiriFontFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 19.sp,
+                        fontSize = 18.5.sp,
                         color = EmeraldGreen
                     )
                 }
@@ -197,7 +239,7 @@ fun AddOrEditDhikrDialog(
                                 .clickable { mode = "edit" }
                         ) {
                             Text(
-                                text = "✏️ تعديل الذكر الحالي",
+                                text = "✏️ تعديل / نقل لباب",
                                 color = if (mode == "edit") Color.White else Color(0xFF1A110B),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.5.sp,
@@ -236,11 +278,314 @@ fun AddOrEditDhikrDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "القسم: $categoryTitle",
+                    text = "القسم الحالي: $categoryTitle",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = GoldAccent
                 )
+
+                // =========================================================================
+                // Multi-Destination Picker: Add/Copy Dhikr to Morning, Evening, Tasbeeh, Favorites, or any of the 132 Hisn Chapters
+                // =========================================================================
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFF3E9D2),
+                    border = BorderStroke(1.dp, GoldBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (mode == "edit")
+                                "📌 إضافة / نسخ هذا الذكر إلى أقسام أو أبواب أخرى:"
+                            else
+                                "📌 اختر الأقسام والأبواب المراد إضافة الذكر إليها:",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.5.sp,
+                            color = EmeraldGreen
+                        )
+
+                        val mainScopes = listOf(
+                            "morning" to "☀️ أذكار الصباح",
+                            "evening" to "🌙 أذكار المساء",
+                            "tasbeeh" to "📿 عداد التسبيح",
+                            "favorites" to "❤️ المفضلة"
+                        )
+
+                        // 2x2 Grid for the 4 Main Sections
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            mainScopes.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    rowItems.forEach { (key, label) ->
+                                        val isCurrentInEdit = mode == "edit" && key == scopeKey
+                                        val isChecked = isCurrentInEdit || selectedTargetScopes.contains(key)
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isChecked) EmeraldGreen else Color(0xFFFDF8EC),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isChecked) EmeraldGreen else GoldBorder
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .clickable(enabled = !isCurrentInEdit) {
+                                                    if (selectedTargetScopes.contains(key)) {
+                                                        if (mode == "edit" || selectedTargetScopes.size > 1) {
+                                                            selectedTargetScopes.remove(key)
+                                                        }
+                                                    } else {
+                                                        selectedTargetScopes.add(key)
+                                                    }
+                                                }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isChecked) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
+                                                    contentDescription = null,
+                                                    tint = if (isChecked) Color.White else EmeraldGreen,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (isCurrentInEdit) "$label (الحالي)" else label,
+                                                    color = if (isChecked) Color.White else Color(0xFF1A110B),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Button to pick from any of the 132 Chapters of Hisn Al-Muslim
+                        val selectedHisnScopeKeys = selectedTargetScopes.filter { it.startsWith("hisn_ch_") }
+                        OutlinedButton(
+                            onClick = { showHisnChapterPicker = !showHisnChapterPicker },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, EmeraldGreen),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (selectedHisnScopeKeys.isNotEmpty()) EmeraldGreen.copy(alpha = 0.12f) else Color(0xFFFDF8EC),
+                                contentColor = EmeraldGreen
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MenuBook,
+                                contentDescription = null,
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (selectedHisnScopeKeys.isEmpty())
+                                    "📖 إضافة إلى باب من أبواب حصن المسلم (١٣٢ باباً)"
+                                else
+                                    "📖 تم اختيار (${selectedHisnScopeKeys.size}) باب من حصن المسلم",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = EmeraldGreen,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        // Selected Hisn Chapters Chips
+                        if (selectedHisnScopeKeys.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                selectedHisnScopeKeys.forEach { chScope ->
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = EmeraldGreen,
+                                        modifier = Modifier.clickable {
+                                            selectedTargetScopes.remove(chScope)
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = resolveScopeLabel(chScope),
+                                                color = Color.White,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "إزالة",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Expandable Searchable List of 132 Hisn Al-Muslim Chapters
+                        if (showHisnChapterPicker) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFFDF8EC),
+                                border = BorderStroke(1.dp, GoldBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = hisnChapterSearchQuery,
+                                        onValueChange = { hisnChapterSearchQuery = it },
+                                        placeholder = { Text("ابحث عن اسم الباب (مثال: النوم، السفر، الصلاة...)", fontSize = 11.5.sp) },
+                                        singleLine = true,
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Search,
+                                                contentDescription = null,
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 170.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        filteredHisnChapters.forEach { chapter ->
+                                            val chScope = "hisn_ch_${chapter.id}"
+                                            val isSelected = selectedTargetScopes.contains(chScope) || (mode == "edit" && scopeKey == chScope)
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isSelected) EmeraldGreen.copy(alpha = 0.14f) else Color.Transparent,
+                                                border = BorderStroke(
+                                                    0.7.dp,
+                                                    if (isSelected) EmeraldGreen else GoldBorder.copy(alpha = 0.5f)
+                                                ),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        if (selectedTargetScopes.contains(chScope)) {
+                                                            selectedTargetScopes.remove(chScope)
+                                                        } else {
+                                                            selectedTargetScopes.add(chScope)
+                                                        }
+                                                    }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = "${chapter.id}. ${chapter.title}",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                                        color = if (isSelected) EmeraldGreen else Color(0xFF1A110B),
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Icon(
+                                                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
+                                                        contentDescription = null,
+                                                        tint = if (isSelected) EmeraldGreen else GoldAccent,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Instant Copy Button in Edit Mode when user selects extra destinations
+                        if (mode == "edit" && selectedTargetScopes.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    val cleanText = textInput.trim()
+                                    if (cleanText.isEmpty()) {
+                                        Toast.makeText(context, "يرجى التأكد من وجود نص الذكر", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    val targetRepeat = (countInput.toIntOrNull() ?: 1).coerceIn(1, 10000)
+                                    val targetsWithTitles = selectedTargetScopes.map { tScope ->
+                                        tScope to resolveScopeLabel(tScope)
+                                    }
+                                    val copiedCount = AdhkarCustomizationManager.copyOrAddDhikrToScopes(
+                                        context = context,
+                                        targets = targetsWithTitles,
+                                        title = titleInput.trim().ifBlank { initialTitle.ifBlank { "ذكر مضاف" } },
+                                        arabicText = cleanText,
+                                        benefit = benefitInput.trim(),
+                                        targetCount = targetRepeat,
+                                        insertAtStart = insertAtStart
+                                    )
+                                    val destNames = targetsWithTitles.joinToString("، ") { it.second }
+                                    Toast.makeText(
+                                        context,
+                                        "تمت إضافة الذكر بنجاح إلى ($copiedCount): $destNames ✓",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    onSaved()
+                                    onDismiss()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = EmeraldGreen,
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("copy_dhikr_to_selected_scopes_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddCircleOutline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "إضافة الذكر الآن إلى الأقسام المختارة (${selectedTargetScopes.size})",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
 
                 // Quick Reorder Controls when editing an existing Dhikr
                 if (mode == "edit" && initialUniqueKey.isNotBlank() && currentScopeKeys.size > 1) {
@@ -340,55 +685,53 @@ fun AddOrEditDhikrDialog(
                     }
                 }
 
-                // Placement Choice when Adding a New Dhikr (End of list vs Start of list)
-                if (mode == "add") {
-                    Text(
-                        text = "مكان إضافة الذكر الجديد:",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = EmeraldGreen
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Placement Choice when Adding or Copying a Dhikr (End of list vs Start of list)
+                Text(
+                    text = "مكان وضع الذكر عند الإضافة:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = EmeraldGreen
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (!insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
+                        border = BorderStroke(1.dp, if (!insertAtStart) EmeraldGreen else GoldBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { insertAtStart = false }
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (!insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
-                            border = BorderStroke(1.dp, if (!insertAtStart) EmeraldGreen else GoldBorder),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { insertAtStart = false }
-                        ) {
-                            Text(
-                                text = "⬇️ في نهاية القائمة",
-                                color = if (!insertAtStart) Color.White else Color(0xFF1A110B),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
-                            )
-                        }
+                        Text(
+                            text = "⬇️ في نهاية القائمة",
+                            color = if (!insertAtStart) Color.White else Color(0xFF1A110B),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
+                        )
+                    }
 
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
-                            border = BorderStroke(1.dp, if (insertAtStart) EmeraldGreen else GoldBorder),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { insertAtStart = true }
-                        ) {
-                            Text(
-                                text = "⬆️ في بداية القائمة",
-                                color = if (insertAtStart) Color.White else Color(0xFF1A110B),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
-                            )
-                        }
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (insertAtStart) EmeraldGreen else Color(0xFFF3E9D2),
+                        border = BorderStroke(1.dp, if (insertAtStart) EmeraldGreen else GoldBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { insertAtStart = true }
+                    ) {
+                        Text(
+                            text = "⬆️ في بداية القائمة",
+                            color = if (insertAtStart) Color.White else Color(0xFF1A110B),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 6.dp)
+                        )
                     }
                 }
 
@@ -474,27 +817,6 @@ fun AddOrEditDhikrDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (mode == "add" && scopeKey != "favorites") {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { alsoFavorite = !alsoFavorite }
-                    ) {
-                        Checkbox(
-                            checked = alsoFavorite,
-                            onCheckedChange = { alsoFavorite = it },
-                            colors = CheckboxDefaults.colors(checkedColor = EmeraldGreen)
-                        )
-                        Text(
-                            text = "إضافة هذا الذكر أيضاً إلى «الأذكار المفضلة ❤️»",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1A110B)
-                        )
-                    }
-                }
-
                 // 5. Delete Dhikr Button (when in Edit mode)
                 if (mode == "edit" && initialUniqueKey.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -539,36 +861,67 @@ fun AddOrEditDhikrDialog(
                         return@Button
                     }
                     val targetRepeat = (countInput.toIntOrNull() ?: 1).coerceIn(1, 10000)
+                    val cleanTitle = titleInput.trim().ifBlank { initialTitle.ifBlank { "ذكر مضاف" } }
+
                     if (mode == "edit" && initialUniqueKey.isNotBlank()) {
                         AdhkarCustomizationManager.saveOverride(
                             context = context,
                             uniqueKey = initialUniqueKey,
-                            title = titleInput.trim().ifBlank { initialTitle },
+                            title = cleanTitle,
                             arabicText = cleanText,
                             benefit = benefitInput.trim(),
                             targetCount = targetRepeat
                         )
-                        Toast.makeText(
-                            context,
-                            "تم حفظ تعديل الذكر وتحديث التكرار إلى (${formatRepeatCountArabic(targetRepeat)})",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        // Also copy/add to any additional scopes selected by the user
+                        if (selectedTargetScopes.isNotEmpty()) {
+                            val targetsWithTitles = selectedTargetScopes.map { tScope ->
+                                tScope to resolveScopeLabel(tScope)
+                            }
+                            AdhkarCustomizationManager.copyOrAddDhikrToScopes(
+                                context = context,
+                                targets = targetsWithTitles,
+                                title = cleanTitle,
+                                arabicText = cleanText,
+                                benefit = benefitInput.trim(),
+                                targetCount = targetRepeat,
+                                insertAtStart = insertAtStart
+                            )
+                            val destNames = targetsWithTitles.joinToString("، ") { it.second }
+                            Toast.makeText(
+                                context,
+                                "تم حفظ التعديل وإضافة الذكر إلى: $destNames ✓",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "تم حفظ تعديل الذكر وتحديث التكرار إلى (${formatRepeatCountArabic(targetRepeat)})",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     } else {
-                        AdhkarCustomizationManager.addCustomDhikr(
+                        val effectiveScopes = if (selectedTargetScopes.isEmpty()) {
+                            listOf(scopeKey)
+                        } else {
+                            selectedTargetScopes.toList()
+                        }
+                        val targetsWithTitles = effectiveScopes.map { tScope ->
+                            tScope to resolveScopeLabel(tScope)
+                        }
+                        AdhkarCustomizationManager.copyOrAddDhikrToScopes(
                             context = context,
-                            scopeKey = scopeKey,
-                            title = titleInput.trim().ifBlank { "ذكر مضاف" },
-                            categoryTitle = categoryTitle,
+                            targets = targetsWithTitles,
+                            title = cleanTitle,
                             arabicText = cleanText,
                             benefit = benefitInput.trim(),
                             targetCount = targetRepeat,
-                            alsoAddToFavorites = alsoFavorite || scopeKey == "favorites",
                             insertAtStart = insertAtStart
                         )
+                        val destNames = targetsWithTitles.joinToString("، ") { it.second }
                         Toast.makeText(
                             context,
-                            "تمت إضافة الذكر الجديد بنجاح (${formatRepeatCountArabic(targetRepeat)})",
-                            Toast.LENGTH_SHORT
+                            "تمت إضافة الذكر الجديد إلى: $destNames (${formatRepeatCountArabic(targetRepeat)})",
+                            Toast.LENGTH_LONG
                         ).show()
                     }
                     onSaved()

@@ -412,6 +412,111 @@ object AdhkarCustomizationManager {
         return newItem
     }
 
+    /**
+     * Copies or adds a Dhikr to multiple target scopes (e.g., "morning", "evening", "tasbeeh",
+     * "favorites", or any Hisn Al-Muslim chapter "hisn_ch_<id>").
+     * Avoids duplicating if a custom item with the exact same text already exists in that target scope.
+     */
+    fun copyOrAddDhikrToScopes(
+        context: Context,
+        targets: List<Pair<String, String>>, // Pair(targetScopeKey, targetCategoryTitle)
+        title: String,
+        arabicText: String,
+        benefit: String,
+        targetCount: Int,
+        insertAtStart: Boolean = false
+    ): Int {
+        val cleanText = arabicText.trim()
+        if (cleanText.isBlank() || targets.isEmpty()) return 0
+        val cleanTitle = title.trim().ifBlank { "ذكر ودعاء مضاف" }
+        val cleanCount = targetCount.coerceIn(1, 10000)
+
+        var addedOrUpdatedCount = 0
+        val currentCustom = getCustomAddedAdhkar(context).toMutableList()
+        var favsModified = false
+        val currentFavs = getFavoriteItems(context).toMutableList()
+
+        targets.distinctBy { it.first }.forEachIndexed { idx, (targetScope, targetCategoryTitle) ->
+            if (targetScope == "favorites") {
+                val existingFavIdx = currentFavs.indexOfFirst { it.arabicText.trim() == cleanText }
+                if (existingFavIdx >= 0) {
+                    val old = currentFavs[existingFavIdx]
+                    currentFavs[existingFavIdx] = old.copy(
+                        title = cleanTitle,
+                        benefit = benefit.trim(),
+                        targetCount = cleanCount
+                    )
+                } else {
+                    val newFav = UnifiedDhikrItem(
+                        uniqueKey = "custom_favorites_${System.currentTimeMillis()}_$idx",
+                        scopeKey = "favorites",
+                        title = cleanTitle,
+                        categoryTitle = targetCategoryTitle.ifBlank { "الأذكار والأدعية المفضلة" },
+                        arabicText = cleanText,
+                        benefit = benefit.trim(),
+                        targetCount = cleanCount,
+                        isCustomAdded = true
+                    )
+                    if (insertAtStart) {
+                        currentFavs.add(0, newFav)
+                    } else {
+                        currentFavs.add(newFav)
+                    }
+                }
+                favsModified = true
+                addedOrUpdatedCount++
+            } else {
+                val existingIdx = currentCustom.indexOfFirst {
+                    it.scopeKey == targetScope && it.arabicText.trim() == cleanText
+                }
+                if (existingIdx >= 0) {
+                    val old = currentCustom[existingIdx]
+                    currentCustom[existingIdx] = old.copy(
+                        title = cleanTitle,
+                        categoryTitle = targetCategoryTitle.ifBlank { old.categoryTitle },
+                        benefit = benefit.trim(),
+                        targetCount = cleanCount
+                    )
+                } else {
+                    val newKey = "custom_${targetScope}_${System.currentTimeMillis()}_$idx"
+                    val newItem = UnifiedDhikrItem(
+                        uniqueKey = newKey,
+                        scopeKey = targetScope,
+                        title = cleanTitle,
+                        categoryTitle = targetCategoryTitle.ifBlank { "ذكر مضاف" },
+                        arabicText = cleanText,
+                        benefit = benefit.trim(),
+                        targetCount = cleanCount,
+                        isCustomAdded = true
+                    )
+                    if (insertAtStart) {
+                        currentCustom.add(0, newItem)
+                    } else {
+                        currentCustom.add(newItem)
+                    }
+                    val existingOrder = getScopeOrderList(context, targetScope).toMutableList()
+                    if (existingOrder.isNotEmpty()) {
+                        if (insertAtStart) {
+                            existingOrder.add(0, newKey)
+                        } else {
+                            existingOrder.add(newKey)
+                        }
+                        saveScopeOrderList(context, targetScope, existingOrder)
+                    }
+                }
+                addedOrUpdatedCount++
+            }
+        }
+
+        persistCustomAddedAdhkar(context, currentCustom)
+        if (favsModified) {
+            persistFavoriteItems(context, currentFavs)
+            saveScopeOrderList(context, "favorites", currentFavs.map { it.uniqueKey })
+        }
+        notifyUpdated()
+        return addedOrUpdatedCount
+    }
+
     private fun persistCustomAddedAdhkar(context: Context, list: List<UnifiedDhikrItem>) {
         val arr = JSONArray()
         list.forEach { item ->

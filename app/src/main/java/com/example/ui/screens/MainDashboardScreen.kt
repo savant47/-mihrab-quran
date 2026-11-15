@@ -695,7 +695,7 @@ fun MainDashboardScreen(
                                 }
                             }
                         } else {
-                            // Circular Progress Card for Full Khatma Track
+                            // Unified Circular Progress & Telemetry Card for Full Khatma Track
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -706,68 +706,198 @@ fun MainDashboardScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(18.dp),
+                                        .padding(horizontal = 12.dp, vertical = 14.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
                                         text = "${activeTrack.trackName} • الختمة ${activeTrack.khatmaNumber}",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = EmeraldGreen
+                                        color = EmeraldGreen,
+                                        textAlign = TextAlign.Center
                                     )
 
-                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Spacer(modifier = Modifier.height(12.dp))
 
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier.size(152.dp)
+                                    // Unified Row: Right Capsule (المعدل اليومي) + Progress Circle (with المتبقي للختم) + Left Capsule (ختام المصحف)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        val strokeWidth = 13.dp
-                                        val primaryColor = EmeraldGreen
-                                        val backgroundColor = GoldBorder.copy(alpha = 0.35f)
-                                        val progressSweep = (metrics.progressPercentage / 100.0 * 360.0).toFloat()
-
-                                        Canvas(modifier = Modifier.fillMaxSize()) {
-                                            drawArc(
-                                                color = backgroundColor,
-                                                startAngle = 0f,
-                                                sweepAngle = 360f,
-                                                useCenter = false,
-                                                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-                                            )
-                                            drawArc(
-                                                color = primaryColor,
-                                                startAngle = -90f,
-                                                sweepAngle = progressSweep,
-                                                useCenter = false,
-                                                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-                                            )
+                                        // Side Capsule 1: المعدل اليومي للقراءة
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = Color(0xFFF3E9D2),
+                                            border = BorderStroke(1.dp, GoldBorder)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Speed,
+                                                        contentDescription = null,
+                                                        tint = GoldAccent,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = "المعدل اليومي",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = EmeraldGreen,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "${metrics.actualDailyPacePages} صفحة/يوم",
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Color(0xFF1A110B),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = "~1 ربع/يوم",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF1A110B).copy(alpha = 0.72f),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
                                         }
 
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(
-                                                text = "${metrics.progressPercentage}%",
-                                                style = MaterialTheme.typography.headlineMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = EmeraldGreen
-                                            )
-                                            Text(
-                                                text = "${metrics.currentPage} / 604 صفحة",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                                            )
+                                        // Center Progress Circle (Includes Percentage + Current Page + المتبقي للختم)
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.size(138.dp)
+                                        ) {
+                                            val strokeWidth = 10.5.dp
+                                            val primaryColor = EmeraldGreen
+                                            val backgroundColor = GoldBorder.copy(alpha = 0.35f)
+                                            val progressSweep = (metrics.progressPercentage / 100.0 * 360.0).toFloat()
+
+                                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                                drawArc(
+                                                    color = backgroundColor,
+                                                    startAngle = 0f,
+                                                    sweepAngle = 360f,
+                                                    useCenter = false,
+                                                    style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                                                )
+                                                drawArc(
+                                                    color = primaryColor,
+                                                    startAngle = -90f,
+                                                    sweepAngle = progressSweep,
+                                                    useCenter = false,
+                                                    style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+                                                )
+                                            }
+
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center,
+                                                modifier = Modifier.padding(horizontal = 10.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${metrics.progressPercentage}%",
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = EmeraldGreen,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = "${metrics.currentPage} / 604 ص",
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = "متبقي ${metrics.remainingPages} ص",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = EmeraldGreen,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = "(${metrics.remainingRubCount} ربع حزب)",
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+
+                                        // Side Capsule 2: الموعد المتوقع لختام المصحف
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = Color(0xFFF3E9D2),
+                                            border = BorderStroke(1.dp, GoldBorder)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.CalendarToday,
+                                                        contentDescription = null,
+                                                        tint = GoldAccent,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = "ختام المصحف",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = EmeraldGreen,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                                Text(
+                                                    text = metrics.projectedCompletionDate,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Color(0xFF1A110B),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = "الموعد المتوقع",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF1A110B).copy(alpha = 0.72f),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Spacer(modifier = Modifier.height(14.dp))
 
                                     // Concise, Unclipped Action Buttons for Active Khatma Track
                                     Column(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        // Primary Button 1: متابعة القراءة (ص X)
+                                        // Primary Button 1: متابعة القراءة (Includes Page + Surah + Ayah without separate card)
                                         Button(
                                             onClick = {
                                                 val target = activeTrack.currentPage.coerceIn(1, 604)
@@ -788,7 +918,7 @@ fun MainDashboardScreen(
                                                 .defaultMinSize(minHeight = 46.dp)
                                                 .testTag("resume_track_primary_button"),
                                             shape = RoundedCornerShape(14.dp),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = EmeraldGreen,
                                                 contentColor = Color.White
@@ -797,16 +927,16 @@ fun MainDashboardScreen(
                                             Icon(
                                                 imageVector = Icons.Default.MenuBook,
                                                 contentDescription = null,
-                                                modifier = Modifier.size(19.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = "متابعة القراءة (ص ${activeTrack.currentPage} • ${activeTrack.currentSurah})",
+                                                text = "متابعة القراءة (ص ${activeTrack.currentPage} • ${activeTrack.currentSurah} • آية ${activeTrack.currentAyah})",
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 13.5.sp,
+                                                fontSize = 13.sp,
                                                 color = Color.White,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                textAlign = TextAlign.Center,
+                                                softWrap = true
                                             )
                                         }
 
@@ -893,57 +1023,6 @@ fun MainDashboardScreen(
                                         )
                                     }
                                 }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Telemetry Grid (Compact & Organized 2x2 for Khatma tracks)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                MetricCard(
-                                    modifier = Modifier.weight(1f),
-                                    title = "المتبقي للختم",
-                                    value = "${metrics.remainingPages} صفحة",
-                                    subtitle = "(${metrics.remainingRubCount} ربع حزب)",
-                                    icon = Icons.Default.MenuBook
-                                )
-                                MetricCard(
-                                    modifier = Modifier.weight(1f),
-                                    title = "المعدل اليومي",
-                                    value = "${metrics.actualDailyPacePages} صفحة/يوم",
-                                    subtitle = "~1 ربع/يوم",
-                                    icon = Icons.Default.Speed
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                MetricCard(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable {
-                                            quranTargetPage = activeTrack.currentPage
-                                            selectedBottomTab = 1
-                                        },
-                                    title = "موقع التوقف",
-                                    value = "${activeTrack.currentSurah} - آية ${activeTrack.currentAyah}",
-                                    subtitle = "صفحة ${activeTrack.currentPage} (اضغط للقراءة)",
-                                    icon = Icons.Default.Book
-                                )
-                                MetricCard(
-                                    modifier = Modifier.weight(1f),
-                                    title = "ختام المصحف",
-                                    value = metrics.projectedCompletionDate,
-                                    subtitle = "التاريخ المتوقع",
-                                    icon = Icons.Default.CalendarToday
-                                )
                             }
                         }
 
