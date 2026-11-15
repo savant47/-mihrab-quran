@@ -47,12 +47,16 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NavigateBefore
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import com.example.data.local.AdhkarCustomizationManager
 import com.example.data.local.UnifiedDhikrItem
 import com.example.ui.components.AddOrEditDhikrDialog
+import com.example.ui.components.ComprehensiveSettingsAndGuideTab
 import com.example.ui.components.DhikrOrderArrowsPill
 import com.example.ui.components.FavoriteHeartCrimson
+import com.example.ui.components.QuranIntentionRenewalButton
+import com.example.ui.components.QuranIntentionRenewalDialog
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -194,7 +198,7 @@ fun MainDashboardScreen(
         }
     }
 
-    LaunchedEffect(selectedBottomTab, activeTrack) {
+    LaunchedEffect(selectedBottomTab, activeTrack.trackId, activeTrack.currentPage, activeTrack.currentSurah, activeTrack.currentAyah) {
         if (activeTrack.isFixedSurahWerd) {
             val fixedPage = activeTrack.fixedSurahStartPage.coerceIn(1, 604)
             val fixedSurah = activeTrack.fixedSurahName.ifBlank { activeTrack.currentSurah }
@@ -204,11 +208,19 @@ fun MainDashboardScreen(
             quranTargetPage = fixedPage
         } else {
             val tId = activeTrack.trackId
-            val savedPage = quranPrefs.getInt("last_read_page_$tId", activeTrack.currentPage)
-            lastReadPage = if (savedPage in 1..604) savedPage else activeTrack.currentPage
-            lastReadSurah = quranPrefs.getString("last_read_surah_$tId", activeTrack.currentSurah) ?: activeTrack.currentSurah
-            lastReadAyah = quranPrefs.getInt("last_read_ayah_$tId", activeTrack.currentAyah)
-            quranTargetPage = lastReadPage
+            val authoritativePage = activeTrack.currentPage.coerceIn(1, 604)
+            val authoritativeSurah = activeTrack.currentSurah.ifBlank { "الفاتحة" }
+            val authoritativeAyah = activeTrack.currentAyah.coerceAtLeast(1)
+            lastReadPage = authoritativePage
+            lastReadSurah = authoritativeSurah
+            lastReadAyah = authoritativeAyah
+            quranTargetPage = authoritativePage
+            localStorage.syncTrackToQuranReaderPrefs(
+                trackId = tId,
+                surah = authoritativeSurah,
+                ayah = authoritativeAyah,
+                page = authoritativePage
+            )
         }
     }
 
@@ -218,6 +230,7 @@ fun MainDashboardScreen(
     var showCreateTrackDialog by remember { mutableStateOf(false) }
     var showRenameTrackDialog by remember { mutableStateOf(false) }
     var showWaqfDedicationDialog by remember { mutableStateOf(false) }
+    var showIntentionRenewalDialog by remember { mutableStateOf(false) }
 
     BackHandler(enabled = selectedBottomTab == 1 && isMushafFullScreen) {
         isMushafFullScreen = false
@@ -395,8 +408,8 @@ fun MainDashboardScreen(
                     NavigationBarItem(
                         selected = selectedBottomTab == 3,
                         onClick = { selectedBottomTab = 3 },
-                        icon = { Icon(imageVector = Icons.Default.History, contentDescription = "السجل") },
-                        label = { Text("السجل", fontSize = 11.sp, maxLines = 1) }
+                        icon = { Icon(imageVector = Icons.Default.Settings, contentDescription = "إعدادات") },
+                        label = { Text("⚙️ إعدادات", fontSize = 11.sp, maxLines = 1) }
                     )
                 }
             }
@@ -418,6 +431,13 @@ fun MainDashboardScreen(
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Prominent Button: دعاء تجديد نوايا قراءة القرآن الكريم
+                        QuranIntentionRenewalButton(
+                            onClick = { showIntentionRenewalDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         // Multi-Track Selector Row (Concise & High Contrast)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -535,12 +555,16 @@ fun MainDashboardScreen(
                                                 .clickable {
                                                     onSelectTrack(track.trackId)
                                                     quranTargetPage = targetStartPage
+                                                    lastReadPage = targetStartPage
+                                                    lastReadSurah = track.currentSurah
+                                                    lastReadAyah = track.currentAyah
                                                     if (!track.isFixedSurahWerd) {
-                                                        quranPrefs.edit()
-                                                            .putInt("last_read_page", targetStartPage)
-                                                            .putString("last_read_surah", track.currentSurah)
-                                                            .putInt("last_read_ayah", track.currentAyah)
-                                                            .apply()
+                                                        localStorage.syncTrackToQuranReaderPrefs(
+                                                            trackId = track.trackId,
+                                                            surah = track.currentSurah,
+                                                            ayah = track.currentAyah,
+                                                            page = targetStartPage
+                                                        )
                                                     }
                                                     selectedBottomTab = 1
                                                 }
@@ -748,11 +772,15 @@ fun MainDashboardScreen(
                                             onClick = {
                                                 val target = activeTrack.currentPage.coerceIn(1, 604)
                                                 quranTargetPage = target
-                                                quranPrefs.edit()
-                                                    .putInt("last_read_page", target)
-                                                    .putString("last_read_surah", activeTrack.currentSurah)
-                                                    .putInt("last_read_ayah", activeTrack.currentAyah)
-                                                    .apply()
+                                                lastReadPage = target
+                                                lastReadSurah = activeTrack.currentSurah
+                                                lastReadAyah = activeTrack.currentAyah
+                                                localStorage.syncTrackToQuranReaderPrefs(
+                                                    trackId = activeTrack.trackId,
+                                                    surah = activeTrack.currentSurah,
+                                                    ayah = activeTrack.currentAyah,
+                                                    page = target
+                                                )
                                                 selectedBottomTab = 1
                                             },
                                             modifier = Modifier
@@ -936,7 +964,7 @@ fun MainDashboardScreen(
                     val effectiveInitialPage = if (activeTrack.isFixedSurahWerd) {
                         activeTrack.fixedSurahStartPage.coerceIn(1, 604)
                     } else {
-                        quranTargetPage
+                        activeTrack.currentPage.coerceIn(1, 604)
                     }
                     QuranReaderScreen(
                         activeTrackId = activeTrack.trackId,
@@ -972,525 +1000,33 @@ fun MainDashboardScreen(
                 }
 
                 3 -> {
-                    // Unified History View ("السجل"):
-                    // 1) إجمالي الأذكار والتسبيحات التراكمي  2) تصفح القراءة في المصحف  3) رسائل البداية
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                    ) {
-                        // Top Header + Backup & Restore Shortcut Button
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "السجل والإحصائيات",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = EmeraldGreen,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "إجمالي التسبيحات والأذكار + قراءات المصحف + رسائل الفتح",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-                                    fontSize = 11.sp
-                                )
-                            }
-
-                            Button(
-                                onClick = { showBackupDialog = true },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = RoyalNavyDark,
-                                    contentColor = EmeraldGreen
-                                ),
-                                border = BorderStroke(1.dp, GoldAccent),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.testTag("history_backup_restore_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Backup,
-                                    contentDescription = null,
-                                    tint = GoldAccent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = "نسخ احتياطي",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldGreen,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // All-Time Cumulative Adhkar & Tasbeeh Counter Card (Point 7)
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFFF3E9D2),
-                            border = BorderStroke(1.4.dp, GoldAccent),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("cumulative_adhkar_tasbeeh_card")
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape)
-                                            .background(EmeraldGreen.copy(alpha = 0.14f))
-                                            .border(1.dp, EmeraldGreen, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.TouchApp,
-                                            contentDescription = null,
-                                            tint = EmeraldGreen,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = "إجمالي الأذكار والتسبيحات التراكمي",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.5.sp,
-                                            color = EmeraldGreen
-                                        )
-                                        Text(
-                                            text = "مجموع كل تسبيحة وذكر قرأته في التطبيق (محفوظ دائماً)",
-                                            fontSize = 10.5.sp,
-                                            color = Color(0xFF1A110B).copy(alpha = 0.72f)
-                                        )
-                                    }
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = EmeraldGreen,
-                                    border = BorderStroke(1.dp, GoldAccent)
-                                ) {
-                                    Text(
-                                        text = "$cumulativeAdhkarTasbeehTotal",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 18.sp,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Segmented Sub-Tab Switcher: [سجل تصفح المصحف] | [سجل الرسائل والأدعية]
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(RoyalNavyDark)
-                                .border(1.dp, GoldBorder, RoundedCornerShape(14.dp))
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val isReadingTab = selectedHistorySubTab == 0
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isReadingTab) EmeraldGreen else Color.Transparent,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectedHistorySubTab = 0 }
-                                    .testTag("history_subtab_mushaf")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.MenuBook,
-                                        contentDescription = null,
-                                        tint = if (isReadingTab) Color.White else EmeraldGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "قراءات المصحف (${readingLogs.size})",
-                                        color = if (isReadingTab) Color.White else EmeraldGreen,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
-
-                            val isMessagesTab = selectedHistorySubTab == 1
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isMessagesTab) EmeraldGreen else Color.Transparent,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectedHistorySubTab = 1 }
-                                    .testTag("history_subtab_messages")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    DoveAndMessageIcon(modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "رسائل الفتح (${spiritualMessages.size})",
-                                        color = if (isMessagesTab) Color.White else EmeraldGreen,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        if (selectedHistorySubTab == 0) {
-                            // SUB-TAB 0: Mushaf Reading & Stop-Point Logs
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), RoundedCornerShape(14.dp)),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "نقطة التوقف الحالية في المصحف",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = GoldAccent,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "سورة $lastReadSurah • آية $lastReadAyah • صفحة $lastReadPage",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Button(
-                                        onClick = {
-                                            quranTargetPage = lastReadPage
-                                            selectedBottomTab = 1
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("متابعة القراءة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            if (readingLogs.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "لا توجد سجلات قراءة سابقة بعد.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                    )
-                                }
-                            } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    items(readingLogs) { log ->
-                                        val dateFormatted = remember(log.timestampMillis) {
-                                            try {
-                                                SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(log.timestampMillis))
-                                            } catch (_: Exception) {
-                                                ""
-                                            }
-                                        }
-                                        Card(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .border(0.5.dp, GoldBorder, RoundedCornerShape(14.dp)),
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                        ) {
-                                            Column(modifier = Modifier.padding(14.dp)) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(
-                                                        text = "سورة ${log.surah} - آية ${log.ayah}",
-                                                        style = MaterialTheme.typography.titleMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = EmeraldGreen
-                                                    )
-                                                    Text(
-                                                        text = "+${log.pagesReadToday} صفحة",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = GoldAccent
-                                                    )
-                                                }
-                                                if (dateFormatted.isNotBlank()) {
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Text(
-                                                        text = dateFormatted,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                                        fontSize = 11.sp
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                                Text(
-                                                    text = log.reflectionSummary,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 4,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // SUB-TAB 1: Startup Spiritual Messages History (رسائل وأدعية فتح التطبيق)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "اضغط على أي رسالة لإعادة فتحها أو مشاركتها:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                                )
-                                TextButton(
-                                    onClick = {
-                                        val nextMsg = localStorage.recordNextStartupMessage()
-                                        activeStartupMessage = nextMsg
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = GoldAccent,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "رسالة جديدة الآن",
-                                        color = GoldAccent,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            if (spiritualMessages.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "لا توجد رسائل محفوظة بعد.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                    )
-                                }
-                            } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    items(spiritualMessages) { msg ->
-                                        val msgDate = remember(msg.timestampMillis) {
-                                            try {
-                                                SimpleDateFormat("yyyy/MM/dd - hh:mm a", Locale.getDefault()).format(Date(msg.timestampMillis))
-                                            } catch (_: Exception) {
-                                                ""
-                                            }
-                                        }
-                                        Card(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .border(
-                                                    width = if (msg.isRead) 0.7.dp else 1.4.dp,
-                                                    color = if (msg.isRead) GoldBorder else GoldAccent,
-                                                    shape = RoundedCornerShape(16.dp)
-                                                )
-                                                .clickable { activeStartupMessage = msg },
-                                            shape = RoundedCornerShape(16.dp),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                        ) {
-                                            Column(modifier = Modifier.padding(14.dp)) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        DoveAndMessageIcon(modifier = Modifier.size(18.dp))
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Text(
-                                                            text = "رسائل إيمانية 🕊️✉️",
-                                                            fontSize = 11.5.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = GoldAccent
-                                                        )
-                                                    }
-
-                                                    Surface(
-                                                        shape = RoundedCornerShape(50),
-                                                        color = if (msg.isRead)
-                                                            EmeraldGreen.copy(alpha = 0.16f)
-                                                        else
-                                                            RoyalNavyDark,
-                                                        border = BorderStroke(
-                                                            0.8.dp,
-                                                            if (msg.isRead) EmeraldGreen else GoldAccent
-                                                        )
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = if (msg.isRead) Icons.Default.DoneAll else Icons.Default.MarkEmailRead,
-                                                                contentDescription = null,
-                                                                tint = if (msg.isRead) EmeraldGreen else GoldAccent,
-                                                                modifier = Modifier.size(12.dp)
-                                                            )
-                                                            Spacer(modifier = Modifier.width(3.dp))
-                                                            Text(
-                                                                text = if (msg.isRead) "تمت القراءة" else "اضغط للقراءة",
-                                                                fontSize = 10.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = if (msg.isRead) EmeraldGreen else GoldAccent
-                                                            )
-                                                        }
-                                                    }
-                                                }
-
-                                                Spacer(modifier = Modifier.height(6.dp))
-
-                                                Text(
-                                                    text = msg.categoryTitle,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = EmeraldGreen
-                                                )
-
-                                                Spacer(modifier = Modifier.height(6.dp))
-
-                                                Text(
-                                                    text = msg.arabicText,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 3,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-
-                                                Spacer(modifier = Modifier.height(8.dp))
-
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = msg.sourceReference,
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            color = GoldAccent
-                                                        )
-                                                        if (msgDate.isNotBlank()) {
-                                                            Text(
-                                                                text = msgDate,
-                                                                fontSize = 10.sp,
-                                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                                                            )
-                                                        }
-                                                    }
-
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        OutlinedButton(
-                                                            onClick = { activeStartupMessage = msg },
-                                                            shape = RoundedCornerShape(8.dp),
-                                                            border = BorderStroke(0.8.dp, GoldAccent),
-                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                            modifier = Modifier.height(32.dp)
-                                                        ) {
-                                                            Text("فتح الرسالة", fontSize = 11.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
-                                                        }
-
-                                                        IconButton(
-                                                            onClick = { shareSpiritualMessage(context, msg) },
-                                                            modifier = Modifier.size(32.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Share,
-                                                                contentDescription = "مشاركة الرسالة",
-                                                                tint = EmeraldGreen,
-                                                                modifier = Modifier.size(17.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // Comprehensive Settings, User Guide, Backup, Adhan, and Logs Tab ("⚙️ إعدادات")
+                    ComprehensiveSettingsAndGuideTab(
+                        cumulativeAdhkarTasbeehTotal = cumulativeAdhkarTasbeehTotal,
+                        lastReadSurah = lastReadSurah,
+                        lastReadAyah = lastReadAyah,
+                        lastReadPage = lastReadPage,
+                        readingLogs = readingLogs,
+                        spiritualMessages = spiritualMessages,
+                        onResumeReadingAtLastStop = {
+                            quranTargetPage = lastReadPage
+                            selectedBottomTab = 1
+                        },
+                        onOpenBackupDialog = { showBackupDialog = true },
+                        onOpenSpiritualMessage = { msg -> activeStartupMessage = msg },
+                        onGenerateNewSpiritualMessage = {
+                            val nextMsg = localStorage.recordNextStartupMessage()
+                            activeStartupMessage = nextMsg
+                        },
+                        onOpenPrayerAndQiblaTab = { selectedBottomTab = 2 },
+                        onOpenIntentionDuaDialog = { showIntentionRenewalDialog = true }
+                    )
                 }
             }
         }
     }
 
-    // Ornate Historical Startup Spiritual Message Dialog (On App Open or Re-opened from "السجل")
+    // Ornate Historical Startup Spiritual Message Dialog (On App Open or Re-opened from "إعدادات")
     activeStartupMessage?.let { currentMsg ->
         SpiritualStartupMessageDialog(
             message = currentMsg,
@@ -1505,6 +1041,12 @@ fun MainDashboardScreen(
             onDismissClose = {
                 activeStartupMessage = null
             }
+        )
+    }
+
+    if (showIntentionRenewalDialog) {
+        QuranIntentionRenewalDialog(
+            onDismiss = { showIntentionRenewalDialog = false }
         )
     }
 
@@ -1573,7 +1115,19 @@ fun MainDashboardScreen(
                 autoTriggerCameraInDialog = false
             },
             onSubmit = { surah, ayah, page, pagesRead ->
-                onLogProgress(surah, ayah, page, pagesRead)
+                val clampedPage = page.coerceIn(1, 604)
+                val safeAyah = ayah.coerceAtLeast(1)
+                quranTargetPage = clampedPage
+                lastReadPage = clampedPage
+                lastReadSurah = surah
+                lastReadAyah = safeAyah
+                localStorage.syncTrackToQuranReaderPrefs(
+                    trackId = activeTrack.trackId,
+                    surah = surah,
+                    ayah = safeAyah,
+                    page = clampedPage
+                )
+                onLogProgress(surah, safeAyah, clampedPage, pagesRead)
                 showInputDialog = false
                 autoTriggerCameraInDialog = false
             }

@@ -379,7 +379,7 @@ fun PrayerAndQiblaScreen() {
                                 text = if (hasCompassSensor) "المستشعر نشط" else "ضبط يدوي",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (hasCompassSensor) Color(0xFF4ADE80) else GoldAccent,
+                                color = if (hasCompassSensor) EmeraldGreen else GoldAccent,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -422,7 +422,7 @@ fun PrayerAndQiblaScreen() {
                                     Text(
                                         text = settings.locationName,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFDF8EE),
+                                        color = EmeraldGreen,
                                         fontSize = 13.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -536,7 +536,7 @@ fun PrayerAndQiblaScreen() {
                             text = directionInstruction,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (isAlignedWithQibla) Color(0xFF4ADE80) else GoldAccent,
+                            color = if (isAlignedWithQibla) EmeraldGreen else GoldAccent,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -546,7 +546,8 @@ fun PrayerAndQiblaScreen() {
                             else
                                 "أمسك الهاتف بشكل مسطح وأدره حتى ينطبق سهم القبلة الذهبي مع قمة المحراب",
                             fontSize = 12.sp,
-                            color = Color(0xFFFDF8EE).copy(alpha = 0.92f),
+                            color = Color(0xFF1A110B).copy(alpha = 0.85f),
+                            fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -618,7 +619,7 @@ fun PrayerAndQiblaScreen() {
                             Text(
                                 text = "اتجاه هاتفك الحالي",
                                 fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.8f),
+                                color = GoldAccent.copy(alpha = 0.85f),
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
@@ -626,7 +627,7 @@ fun PrayerAndQiblaScreen() {
                                 text = "${normalizedHeading.roundToInt()}° ${cardinalNameAr(normalizedHeading)}",
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = if (isAlignedWithQibla) EmeraldGreen else Color.White
+                                color = EmeraldGreen
                             )
                         }
                     }

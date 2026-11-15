@@ -24,10 +24,35 @@ import org.json.JSONObject
  */
 class LocalKhatmaStorage private constructor(context: Context) {
 
-    private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(
+    private val appContext: Context = context.applicationContext
+    private val prefs: SharedPreferences = appContext.getSharedPreferences(
         PREFS_NAME,
         Context.MODE_PRIVATE
     )
+    private val quranPrefs: SharedPreferences = appContext.getSharedPreferences(
+        "quran_reader_prefs",
+        Context.MODE_PRIVATE
+    )
+
+    fun syncTrackToQuranReaderPrefs(
+        trackId: String,
+        surah: String,
+        ayah: Int,
+        page: Int
+    ) {
+        val clampedPage = page.coerceIn(1, QuranDataHelper.TOTAL_PAGES)
+        val safeAyah = ayah.coerceAtLeast(1)
+        quranPrefs.edit()
+            .putInt("last_viewed_page_$trackId", clampedPage)
+            .putInt("last_read_page_$trackId", clampedPage)
+            .putString("last_read_surah_$trackId", surah)
+            .putInt("last_read_ayah_$trackId", safeAyah)
+            .putInt("last_viewed_page", clampedPage)
+            .putInt("last_read_page", clampedPage)
+            .putString("last_read_surah", surah)
+            .putInt("last_read_ayah", safeAyah)
+            .apply()
+    }
 
     private val _guestUserFlow = MutableStateFlow(loadGuestUser())
     val guestUserFlow: StateFlow<User> = _guestUserFlow.asStateFlow()
@@ -438,24 +463,27 @@ class LocalKhatmaStorage private constructor(context: Context) {
         }
 
         // Also update the active track in local storage (unless it is a Fixed Surah Werd)
+        val clampedPage = page.coerceIn(1, QuranDataHelper.TOTAL_PAGES)
+        val safeAyah = ayah.coerceAtLeast(1)
         val currentTracks = loadTracks().toMutableList()
         val activeIndex = currentTracks.indexOfFirst { it.trackId == trackId }
-        val rubCount = QuranDataHelper.pageToRub(page)
-        val progressPercentage = (page.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
+        val rubCount = QuranDataHelper.pageToRub(clampedPage)
+        val progressPercentage = (clampedPage.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
 
         if (activeIndex >= 0) {
             val existing = currentTracks[activeIndex]
             if (!existing.isFixedSurahWerd) {
                 val updated = existing.copy(
                     currentSurah = surah,
-                    currentAyah = ayah,
-                    currentPage = page,
+                    currentAyah = safeAyah,
+                    currentPage = clampedPage,
                     completedRubCount = rubCount,
                     progressPercentage = progressPercentage,
-                    isCompleted = page >= QuranDataHelper.TOTAL_PAGES
+                    isCompleted = clampedPage >= QuranDataHelper.TOTAL_PAGES
                 )
                 currentTracks[activeIndex] = updated
                 saveTracks(currentTracks)
+                syncTrackToQuranReaderPrefs(trackId, surah, safeAyah, clampedPage)
             }
         } else {
             currentTracks.add(
@@ -463,13 +491,14 @@ class LocalKhatmaStorage private constructor(context: Context) {
                     trackId = trackId,
                     trackName = if (trackId == "main") "الختمة الرئيسية" else "ورد مخصص",
                     currentSurah = surah,
-                    currentAyah = ayah,
-                    currentPage = page,
+                    currentAyah = safeAyah,
+                    currentPage = clampedPage,
                     completedRubCount = rubCount,
                     progressPercentage = progressPercentage
                 )
             )
             saveTracks(currentTracks)
+            syncTrackToQuranReaderPrefs(trackId, surah, safeAyah, clampedPage)
         }
 
         // Update user profile as well if not a fixed surah werd
@@ -479,8 +508,8 @@ class LocalKhatmaStorage private constructor(context: Context) {
             saveGuestUser(
                 currentUser.copy(
                     currentSurah = surah,
-                    currentAyah = ayah,
-                    currentPage = page,
+                    currentAyah = safeAyah,
+                    currentPage = clampedPage,
                     completedRubCount = rubCount,
                     progressPercentage = progressPercentage
                 )
@@ -500,6 +529,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
         page: Int
     ) {
         val clampedPage = page.coerceIn(1, QuranDataHelper.TOTAL_PAGES)
+        val safeAyah = ayah.coerceAtLeast(1)
         val rubCount = QuranDataHelper.pageToRub(clampedPage)
         val progressPercentage = (clampedPage.toDouble() / QuranDataHelper.TOTAL_PAGES.toDouble()) * 100.0
 
@@ -513,7 +543,7 @@ class LocalKhatmaStorage private constructor(context: Context) {
             }
             currentTracks[activeIndex] = existing.copy(
                 currentSurah = surah,
-                currentAyah = ayah,
+                currentAyah = safeAyah,
                 currentPage = clampedPage,
                 completedRubCount = rubCount,
                 progressPercentage = progressPercentage,
@@ -522,11 +552,13 @@ class LocalKhatmaStorage private constructor(context: Context) {
             saveTracks(currentTracks)
         }
 
+        syncTrackToQuranReaderPrefs(trackId, surah, safeAyah, clampedPage)
+
         val currentUser = loadGuestUser()
         saveGuestUser(
             currentUser.copy(
                 currentSurah = surah,
-                currentAyah = ayah,
+                currentAyah = safeAyah,
                 currentPage = clampedPage,
                 completedRubCount = rubCount,
                 progressPercentage = progressPercentage

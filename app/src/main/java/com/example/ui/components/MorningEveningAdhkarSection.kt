@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -760,6 +761,7 @@ fun MorningEveningAdhkarBox() {
 
     var activeDialogType by remember { mutableStateOf<String?>(null) } // "morning" or "evening"
     var showHisnCompleteDialog by remember { mutableStateOf(false) }
+    var showNawawiFortyDialog by remember { mutableStateOf(false) }
     var initialHisnGroupKey by remember { mutableStateOf(HisnSectionGroup.ALL.key) }
     var initialHisnChapterId by remember { mutableStateOf<Int?>(null) }
     var showFavoriteAdhkarDialog by remember { mutableStateOf(false) }
@@ -1182,7 +1184,7 @@ fun MorningEveningAdhkarBox() {
                         }
                     }
 
-                    // 1. Primary Button: Open Complete Hisn Al-Muslim Index & Search
+                    // 1. Primary Row: Hisn Al-Muslim + Al-Nawawi Forty Hadiths stacked cleanly
                     Button(
                         onClick = {
                             initialHisnGroupKey = HisnSectionGroup.ALL.key
@@ -1191,9 +1193,10 @@ fun MorningEveningAdhkarBox() {
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .defaultMinSize(minHeight = 42.dp)
                             .testTag("hisn_al_muslim_complete_button"),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = EmeraldGreen,
                             contentColor = Color.White
@@ -1201,22 +1204,56 @@ fun MorningEveningAdhkarBox() {
                         border = BorderStroke(1.dp, GoldAccent)
                     ) {
                         Text(
-                            text = "فتح فهرس حصن المسلم والبحث",
+                            text = "📖 فتح فهرس حصن المسلم والبحث (١٣٢ باباً)",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 12.5.sp,
                             color = Color.White,
-                            maxLines = 1
+                            textAlign = TextAlign.Center,
+                            softWrap = true
                         )
                     }
 
-                    // 2. External Favorites Button directly below the Hisn Al-Muslim Index button (as requested)
+                    // 2. Complete Book of Al-Arba'un Al-Nawawiyyah (42 Prophetic Hadiths + Explanation) right next to Hisn Al-Muslim
+                    Button(
+                        onClick = { showNawawiFortyDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 42.dp)
+                            .testTag("alnawawi_forty_hadith_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFDF8EC),
+                            contentColor = EmeraldGreen
+                        ),
+                        border = BorderStroke(1.4.dp, GoldAccent)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MenuBook,
+                            contentDescription = "الأربعون النووية",
+                            tint = GoldAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "كتاب الأربعون النووية (٤٢ حديثاً مع الشرح)",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp,
+                            color = EmeraldGreen,
+                            textAlign = TextAlign.Center,
+                            softWrap = true
+                        )
+                    }
+
+                    // 3. External Favorites Button directly below
                     Button(
                         onClick = { showFavoriteAdhkarDialog = true },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .defaultMinSize(minHeight = 42.dp)
                             .testTag("open_favorite_adhkar_external_button"),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFFFDF8EC),
                             contentColor = FavoriteHeartCrimson
@@ -1227,18 +1264,19 @@ fun MorningEveningAdhkarBox() {
                             imageVector = Icons.Default.Favorite,
                             contentDescription = "الأذكار المفضلة",
                             tint = FavoriteHeartCrimson,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = if (totalFavoritesCount > 0)
                                 "الأذكار والأدعية المفضلة ($totalFavoritesCount)"
                             else
                                 "الأذكار والأدعية المفضلة وإضافة ذكر يدوي",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
                             color = FavoriteHeartCrimson,
-                            maxLines = 1
+                            textAlign = TextAlign.Center,
+                            softWrap = true
                         )
                     }
                 }
@@ -1254,6 +1292,19 @@ fun MorningEveningAdhkarBox() {
                 refreshTrigger++
                 initialHisnChapterId = null
                 showHisnCompleteDialog = false
+            }
+        )
+    }
+
+    if (showNawawiFortyDialog) {
+        AlNawawiFortyCompleteDialog(
+            onDismiss = {
+                refreshTrigger++
+                showNawawiFortyDialog = false
+            },
+            onOpenFavorites = {
+                showNawawiFortyDialog = false
+                showFavoriteAdhkarDialog = true
             }
         )
     }

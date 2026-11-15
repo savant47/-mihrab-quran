@@ -176,6 +176,16 @@ object MihrabiAlarmManager {
 
     fun scheduleExactOrInexactAlarm(context: Context, config: AlarmConfig) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, config.hour)
+            set(Calendar.MINUTE, config.minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= System.currentTimeMillis() + 30_000L) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
         val intent = Intent(context, MihrabiAlarmReceiver::class.java).apply {
             action = ACTION_TRIGGER_ALARM
             putExtra("targetId", config.targetId)
@@ -183,6 +193,9 @@ object MihrabiAlarmManager {
             putExtra("subtitle", config.subtitle)
             putExtra("toneType", config.toneType.name)
             putExtra("customToneUri", config.customToneUri)
+            putExtra("scheduledHour", config.hour)
+            putExtra("scheduledMinute", config.minute)
+            putExtra("scheduledTriggerMillis", calendar.timeInMillis)
         }
 
         val requestCode = config.targetId.hashCode()
@@ -193,14 +206,9 @@ object MihrabiAlarmManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val calendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, config.hour)
-            set(Calendar.MINUTE, config.minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= System.currentTimeMillis()) {
-                add(Calendar.DAY_OF_YEAR, 1)
-            }
+        try {
+            alarmManager.cancel(pendingIntent)
+        } catch (_: Exception) {
         }
 
         try {
@@ -438,6 +446,19 @@ class MihrabiAlarmReceiver : BroadcastReceiver() {
             val subtitle = intent.getStringExtra("subtitle") ?: "حان الآن موعد وردك وذكرك اليومي"
             val toneTypeStr = intent.getStringExtra("toneType") ?: ToneType.ISLAMIC_BUNDLED.name
             val customToneUri = intent.getStringExtra("customToneUri") ?: ""
+            val scheduledTriggerMillis = intent.getLongExtra("scheduledTriggerMillis", -1L)
+
+            val savedConfig = MihrabiAlarmManager.getAllAlarms(context).find { it.targetId == targetId }
+            if (savedConfig != null && !savedConfig.isEnabled) {
+                return
+            }
+
+            if (scheduledTriggerMillis > 0L && kotlin.math.abs(System.currentTimeMillis() - scheduledTriggerMillis) > 15 * 60 * 1000L) {
+                if (savedConfig != null && savedConfig.isEnabled) {
+                    MihrabiAlarmManager.scheduleExactOrInexactAlarm(context, savedConfig)
+                }
+                return
+            }
 
             val toneType = try {
                 ToneType.valueOf(toneTypeStr)
@@ -495,7 +516,6 @@ class MihrabiAlarmReceiver : BroadcastReceiver() {
             }
 
             // Reschedule for tomorrow at the same time
-            val savedConfig = MihrabiAlarmManager.getAllAlarms(context).find { it.targetId == targetId }
             if (savedConfig != null && savedConfig.isEnabled) {
                 MihrabiAlarmManager.scheduleExactOrInexactAlarm(context, savedConfig)
             }

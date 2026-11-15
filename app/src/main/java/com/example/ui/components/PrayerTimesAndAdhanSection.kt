@@ -291,7 +291,8 @@ fun PrayerTimesAndAdhanCard(
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = "$remainingText • (${nextPrayerSlot.alertMode.titleAr})",
-                            color = Color(0xFFFDF8EE).copy(alpha = 0.88f),
+                            color = Color(0xFF1A110B).copy(alpha = 0.85f),
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = 11.5.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -476,7 +477,7 @@ fun PrayerTimesAndAdhanCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AdhanSettingsDialog(
+fun AdhanSettingsDialog(
     initialSettings: AdhanSettingsState,
     focusedPrayer: PrayerKey?,
     onRequestAutoLocation: () -> Unit,
@@ -689,9 +690,9 @@ private fun AdhanSettingsDialog(
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (draft.locationName == foundCity.nameAr)
-                                        EmeraldGreen.copy(alpha = 0.25f)
+                                        EmeraldGreen.copy(alpha = 0.18f)
                                     else
-                                        Color(0xFF162C4E),
+                                        Color(0xFFFDF8EC),
                                     border = BorderStroke(
                                         0.7.dp,
                                         if (draft.locationName == foundCity.nameAr) EmeraldGreen else GoldBorder.copy(alpha = 0.5f)
@@ -737,7 +738,7 @@ private fun AdhanSettingsDialog(
                                                 text = foundCity.nameAr,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.5.sp,
-                                                color = Color.White
+                                                color = Color(0xFF1A110B)
                                             )
                                         }
                                         Text(

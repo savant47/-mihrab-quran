@@ -231,40 +231,74 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
         val currentState = _uiState.value as? KhatmaUiState.Success
         val activeTrack = currentState?.activeTrack ?: defaultTrack
         val userName = currentState?.user?.displayName ?: "القارئ المبارك"
+        val safePage = page.coerceIn(1, 604)
+        val safeAyah = ayah.coerceAtLeast(1)
+
+        // 1. Immediately update UI state and persist track checkpoint BEFORE waiting for AI reflection
+        val updatedTrack = activeTrack.copy(
+            currentSurah = surah,
+            currentAyah = safeAyah,
+            currentPage = safePage,
+            completedRubCount = QuranDataHelper.pageToRub(safePage),
+            progressPercentage = (safePage.toDouble() / 604.0) * 100.0,
+            isCompleted = safePage >= 604
+        )
+        val updatedMetrics = QuranDataHelper.calculateMetrics(safePage)
+        val updatedTracksList = _khatmaTracks.value.map {
+            if (it.trackId == activeTrack.trackId) updatedTrack else it
+        }
+        _khatmaTracks.value = updatedTracksList
+
+        if (currentState != null) {
+            _uiState.value = currentState.copy(
+                activeTrack = updatedTrack,
+                tracks = updatedTracksList,
+                metrics = updatedMetrics
+            )
+        }
+
+        if (safePage >= 604) {
+            _showCompletionDialog.value = true
+        }
 
         viewModelScope.launch {
+            try {
+                repository.updateTrackCheckpointSilently(
+                    trackId = activeTrack.trackId,
+                    surah = surah,
+                    ayah = safeAyah,
+                    page = safePage
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving immediate checkpoint", e)
+            }
+
             _isGeneratingReflection.value = true
             try {
-                val reflectionText = aiManager.generateQuranicReflection(
-                    surahName = surah,
-                    ayahNumber = ayah,
-                    pageNumber = page,
-                    userName = userName
-                )
+                val reflectionText = try {
+                    aiManager.generateQuranicReflection(
+                        surahName = surah,
+                        ayahNumber = safeAyah,
+                        pageNumber = safePage,
+                        userName = userName
+                    )
+                } catch (aiErr: Exception) {
+                    Log.w(TAG, "Fallback reflection used due to AI error", aiErr)
+                    "بارك الله في تلاوتك لسورة $surah عند الآية $safeAyah (صفحة $safePage). اللهم اجعل القرآن العظيم ربيع قلوبنا ونور صدورنا."
+                }
 
                 repository.logReadingProgressForTrack(
                     trackId = activeTrack.trackId,
                     surah = surah,
-                    ayah = ayah,
-                    page = page,
-                    pagesReadToday = pagesReadToday,
+                    ayah = safeAyah,
+                    page = safePage,
+                    pagesReadToday = pagesReadToday.coerceAtLeast(1),
                     reflectionSummary = reflectionText
                 )
 
-                if (page >= 604) {
-                    _showCompletionDialog.value = true
-                }
-
-                val updatedTrack = activeTrack.copy(
-                    currentSurah = surah,
-                    currentAyah = ayah,
-                    currentPage = page
-                )
-
-                val updatedMetrics = QuranDataHelper.calculateMetrics(page)
-
-                if (currentState != null) {
-                    _uiState.value = currentState.copy(
+                val latestState = _uiState.value as? KhatmaUiState.Success
+                if (latestState != null) {
+                    _uiState.value = latestState.copy(
                         activeTrack = updatedTrack,
                         metrics = updatedMetrics,
                         latestReflection = reflectionText
@@ -274,8 +308,8 @@ class KhatmaViewModel(application: Application) : AndroidViewModel(application) 
                 // Show the post-log reflection modal with tafsir and story
                 _postLogReflectionDialogData.value = ReflectionDialogData(
                     surah = surah,
-                    ayah = ayah,
-                    page = page,
+                    ayah = safeAyah,
+                    page = safePage,
                     reflectionText = reflectionText
                 )
             } catch (e: Exception) {

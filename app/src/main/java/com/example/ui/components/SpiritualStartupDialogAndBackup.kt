@@ -403,7 +403,7 @@ fun SpiritualStartupMessageDialog(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "تُحفظ هذه الرسالة تلقائياً في تبويب «السجل» للرجوع إليها في أي وقت",
+                        text = "تُحفظ هذه الرسالة تلقائياً في تبويب «⚙️ إعدادات» للرجوع إليها في أي وقت",
                         color = darkInkText.copy(alpha = 0.72f),
                         fontSize = 10.5.sp,
                         textAlign = TextAlign.Center

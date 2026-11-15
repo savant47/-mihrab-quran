@@ -8,6 +8,12 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,10 +45,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.Placeholder
@@ -113,7 +121,20 @@ fun QuranReaderScreen(
         com.example.data.local.LocalKhatmaStorage.getInstance(context).backupRestoreVersionFlow
     }.collectAsState()
 
+    val haptic = LocalHapticFeedback.current
     val audioPlaybackState by QuranAudioPlayerManager.playbackState.collectAsState()
+    val activeWordPronunciation by QuranAudioPlayerManager.activeWordState.collectAsState()
+
+    val wordPulseTransition = rememberInfiniteTransition(label = "word_emerald_pulse")
+    val wordPulseAlpha by wordPulseTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.56f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 520, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "word_emerald_pulse_alpha"
+    )
 
     LaunchedEffect(backupVersion) {
         QuranAudioPlayerManager.initPreferences(context)
@@ -122,8 +143,10 @@ fun QuranReaderScreen(
     val savedLastPage = remember(activeTrackId, backupVersion, isFixedSurahWerd, initialPage) {
         if (isFixedSurahWerd) {
             initialPage.coerceIn(1, 604)
+        } else if (initialPage in 1..604) {
+            initialPage
         } else {
-            quranPrefs.getInt("last_viewed_page_$activeTrackId", initialPage.coerceIn(1, 604)).coerceIn(1, 604)
+            quranPrefs.getInt("last_viewed_page_$activeTrackId", 1).coerceIn(1, 604)
         }
     }
 
@@ -143,12 +166,15 @@ fun QuranReaderScreen(
         }
     }
 
-    val pagerState = rememberPagerState(
-        initialPage = (startPage - 1).coerceIn(0, 603),
-        pageCount = { 604 }
-    )
+    val pagerState = key(activeTrackId) {
+        rememberPagerState(
+            initialPage = (startPage - 1).coerceIn(0, 603),
+            pageCount = { 604 }
+        )
+    }
 
     val currentPage = pagerState.currentPage + 1
+    var hasSettledInitialPage by remember(activeTrackId) { mutableStateOf(false) }
 
     // Reader customization states
     var isNightMushafMode by remember(backupVersion) {
@@ -218,10 +244,11 @@ fun QuranReaderScreen(
     var showSurahIndexDialog by remember { mutableStateOf(false) }
 
     // Synchronize if parent requests jumping to a specific page
-    LaunchedEffect(initialPage) {
-        if (initialPage in 1..604 && initialPage != currentPage) {
+    LaunchedEffect(initialPage, activeTrackId) {
+        if (initialPage in 1..604 && initialPage != pagerState.currentPage + 1) {
             pagerState.scrollToPage(initialPage - 1)
         }
+        hasSettledInitialPage = true
     }
 
     // When audio player advances to an Ayah on a different page, scroll pager automatically
@@ -279,10 +306,11 @@ fun QuranReaderScreen(
         onAutoSaveStopBookmark(surahName, ayahNumber, pageNumber)
     }
 
-    // Automatically save stop-point whenever user flips pages or taps a verse
-    LaunchedEffect(currentPage, currentSurahInfo, floatingPopoverVerse, activeTrackId) {
-        if (isDatabaseReady) {
+    // Automatically save stop-point whenever user flips pages or taps a verse (after initial page has settled)
+    LaunchedEffect(currentPage, currentSurahInfo, floatingPopoverVerse, activeTrackId, hasSettledInitialPage, isDatabaseReady) {
+        if (isDatabaseReady && hasSettledInitialPage) {
             val targetVerse = floatingPopoverVerse?.takeIf { it.page == currentPage }
+                ?: currentPageVerses.firstOrNull { it.surahNameAr == bookmarkedSurah && it.ayahNumber == bookmarkedAyah }
                 ?: currentPageVerses.firstOrNull()
             val sName = targetVerse?.surahNameAr ?: currentSurahInfo.nameArabic
             val aNum = targetVerse?.ayahNumber ?: 1
@@ -293,16 +321,22 @@ fun QuranReaderScreen(
     // Also guarantee auto-save when the user exits the Mushaf screen without pressing Save
     val latestPageRef by rememberUpdatedState(currentPage)
     val latestSurahRef by rememberUpdatedState(
-        floatingPopoverVerse?.takeIf { it.page == currentPage }?.surahNameAr ?: currentSurahInfo.nameArabic
+        floatingPopoverVerse?.takeIf { it.page == currentPage }?.surahNameAr
+            ?: currentPageVerses.firstOrNull { it.surahNameAr == bookmarkedSurah && it.ayahNumber == bookmarkedAyah }?.surahNameAr
+            ?: currentSurahInfo.nameArabic
     )
     val latestAyahRef by rememberUpdatedState(
         floatingPopoverVerse?.takeIf { it.page == currentPage }?.ayahNumber
+            ?: currentPageVerses.firstOrNull { it.surahNameAr == bookmarkedSurah && it.ayahNumber == bookmarkedAyah }?.ayahNumber
             ?: (currentPageVerses.firstOrNull()?.ayahNumber ?: 1)
     )
+    val settledRef by rememberUpdatedState(hasSettledInitialPage)
 
     DisposableEffect(activeTrackId) {
         onDispose {
-            persistAutoStopPoint(latestSurahRef, latestAyahRef, latestPageRef)
+            if (settledRef) {
+                persistAutoStopPoint(latestSurahRef, latestAyahRef, latestPageRef)
+            }
         }
     }
 
@@ -752,6 +786,55 @@ fun QuranReaderScreen(
                 }
             }
 
+            // Subtle Non-Intrusive Word Pronunciation Status Pill (when long-pressing a single word)
+            AnimatedVisibility(
+                visible = activeWordPronunciation != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                activeWordPronunciation?.let { wordState ->
+                    Surface(
+                        color = Color(0xFFD1FAE5),
+                        border = BorderStroke(1.2.dp, Color(0xFF10B981)),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 3.dp)
+                            .testTag("active_word_pronunciation_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VolumeUp,
+                                contentDescription = null,
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "نطق الكلمة: «${wordState.wordText}» (${toArabicIndicDigits(wordState.currentIteration)}/${toArabicIndicDigits(wordState.totalIterations)})",
+                                fontFamily = AmiriFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = Color(0xFF064E3B),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إيقاف نطق الكلمة",
+                                tint = EmeraldGreen,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .clickable { QuranAudioPlayerManager.stopWordPronunciation() }
+                            )
+                        }
+                    }
+                }
+            }
+
             // Main Offline Mushaf Viewport (604 Pages Horizontal Pager)
             if (!isDatabaseReady) {
                 Box(
@@ -790,6 +873,12 @@ fun QuranReaderScreen(
                         }
                     } else null
 
+                    val activeWordHighlightColor = if (isNightMushafMode) {
+                        Color(0xFF10B981).copy(alpha = wordPulseAlpha)
+                    } else {
+                        Color(0xFF34D399).copy(alpha = wordPulseAlpha)
+                    }
+
                     MushafPageContent(
                         pageNumber = pageNum,
                         verses = versesOnThisPage,
@@ -820,8 +909,11 @@ fun QuranReaderScreen(
                         bookmarkedAyah = bookmarkedAyah,
                         memorizedAyahKeys = memorizedAyahKeys,
                         focusedReadingVerseKey = focusedReadingVerseKey,
+                        activeWordKey = activeWordPronunciation?.wordKey,
+                        activeWordHighlightColor = activeWordHighlightColor,
                         selectedVerse = floatingPopoverVerse ?: activePlayingVerse ?: selectedVerseForSheet,
                         onVerseClicked = { clickedVerse ->
+                            QuranAudioPlayerManager.stopWordPronunciation()
                             val clickedKey = "${clickedVerse.surahNumber}:${clickedVerse.ayahNumber}"
                             val nowMs = System.currentTimeMillis()
                             focusedReadingVerseKey = clickedKey
@@ -839,6 +931,27 @@ fun QuranReaderScreen(
                                 lastTappedVerseKey = clickedKey
                                 lastTapTimestampMs = nowMs
                             }
+                        },
+                        onVerseDoubleTapped = { doubleTappedVerse ->
+                            QuranAudioPlayerManager.stopWordPronunciation()
+                            val clickedKey = "${doubleTappedVerse.surahNumber}:${doubleTappedVerse.ayahNumber}"
+                            focusedReadingVerseKey = clickedKey
+                            quranPrefs.edit()
+                                .putString("focused_verse_key_$activeTrackId", clickedKey)
+                                .apply()
+                            persistAutoStopPoint(doubleTappedVerse.surahNameAr, doubleTappedVerse.ayahNumber, doubleTappedVerse.page)
+                            floatingPopoverVerse = doubleTappedVerse
+                        },
+                        onWordLongPressed = { surahNum, ayahNum, wordIdx1Based, totalWordsInAyah, wordText ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            QuranAudioPlayerManager.playSingleWordTwice(
+                                context = context,
+                                surahNumber = surahNum,
+                                ayahNumber = ayahNum,
+                                wordIndex1Based = wordIdx1Based,
+                                wordText = wordText,
+                                totalWordsInAyah = totalWordsInAyah
+                            )
                         }
                     )
                 }
@@ -2059,14 +2172,53 @@ private fun normalizeWordForDivineNameCheck(word: String): String {
     return sb.toString()
 }
 
+private fun countSpokenWordsInAyah(rawText: String): Int {
+    var count = 0
+    var index = 0
+    val len = rawText.length
+    while (index < len) {
+        val start = index
+        val isSpace = rawText[index].isWhitespace()
+        while (index < len && rawText[index].isWhitespace() == isSpace) {
+            index++
+        }
+        if (!isSpace) {
+            val token = rawText.substring(start, index)
+            var leadIdx = 0
+            while (leadIdx < token.length && token[leadIdx] == '\u06DE') {
+                leadIdx++
+            }
+            val remainingToken = token.substring(leadIdx)
+            if (remainingToken.isNotEmpty()) {
+                var splitIdx = remainingToken.length
+                while (splitIdx > 0 && isUthmaniWaqfChar(remainingToken[splitIdx - 1])) {
+                    splitIdx--
+                }
+                val coreWord = remainingToken.substring(0, splitIdx)
+                val isPureWaqfToken = coreWord.isEmpty() || coreWord.all { isUthmaniWaqfChar(it) }
+                if (coreWord.isNotEmpty() && !isPureWaqfToken) {
+                    count++
+                }
+            }
+        }
+    }
+    return count.coerceAtLeast(1)
+}
+
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColoredQuranText(
     rawText: String,
     baseTextColor: Color,
     divineNameColor: Color,
     waqfColor: Color,
     bgHighlight: Color,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    verseTagKey: String = "",
+    activeWordKey: String? = null,
+    activeWordHighlightColor: Color = Color.Transparent
 ) {
+    val totalWordsInAyah = if (verseTagKey.isNotEmpty()) countSpokenWordsInAyah(rawText) else 1
+    var spokenWordCounter = 0
+
     // Split preserving whitespace segments so word boundaries remain exact
     var index = 0
     val len = rawText.length
@@ -2124,21 +2276,40 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                 val isPureWaqfToken = coreWord.isEmpty() || coreWord.all { isUthmaniWaqfChar(it) }
 
                 if (coreWord.isNotEmpty()) {
+                    val isSpokenWord = !isPureWaqfToken && verseTagKey.isNotEmpty()
+                    if (isSpokenWord) {
+                        spokenWordCounter++
+                    }
+                    val currentWordKey = if (isSpokenWord) "$verseTagKey:$spokenWordCounter" else ""
+                    val isWordPronouncing = currentWordKey.isNotEmpty() && currentWordKey == activeWordKey
+
                     val wordColor = when {
+                        isWordPronouncing -> Color(0xFF064E3B)
                         isDivineName -> divineNameColor
                         isPureWaqfToken -> waqfColor
                         else -> baseTextColor
                     }
+                    val effectiveWordBg = if (isWordPronouncing) activeWordHighlightColor else bgHighlight
+
+                    if (isSpokenWord) {
+                        pushStringAnnotation(
+                            tag = "WORD_TAP",
+                            annotation = "$currentWordKey|$totalWordsInAyah|$coreWord"
+                        )
+                    }
                     withStyle(
                         SpanStyle(
                             color = wordColor,
-                            background = bgHighlight,
+                            background = effectiveWordBg,
                             fontFamily = AmiriFontFamily,
                             fontSize = fontSizeSp.sp,
-                            fontWeight = if (isDivineName) FontWeight.ExtraBold else FontWeight.Bold
+                            fontWeight = if (isDivineName || isWordPronouncing) FontWeight.ExtraBold else FontWeight.Bold
                         )
                     ) {
                         append(coreWord)
+                    }
+                    if (isSpokenWord) {
+                        pop()
                     }
                 }
                 if (trailingWaqf.isNotEmpty()) {
@@ -2195,8 +2366,12 @@ private fun MushafPageContent(
     bookmarkedAyah: Int,
     memorizedAyahKeys: Set<String>,
     focusedReadingVerseKey: String? = null,
+    activeWordKey: String? = null,
+    activeWordHighlightColor: Color = Color.Transparent,
     selectedVerse: OfflineVerse?,
-    onVerseClicked: (OfflineVerse) -> Unit
+    onVerseClicked: (OfflineVerse) -> Unit,
+    onVerseDoubleTapped: (OfflineVerse) -> Unit = onVerseClicked,
+    onWordLongPressed: (surahNumber: Int, ayahNumber: Int, wordIndex1Based: Int, totalWordsInAyah: Int, wordText: String) -> Unit = { _, _, _, _, _ -> }
 ) {
     val firstVerse = verses.firstOrNull()
     val lastVerse = verses.lastOrNull()
@@ -2540,7 +2715,10 @@ private fun MushafPageContent(
                                         divineNameColor = divineNameColor,
                                         waqfColor = waqfMarkColor,
                                         bgHighlight = bgHighlight,
-                                        fontSizeSp = displayFontSp
+                                        fontSizeSp = displayFontSp,
+                                        verseTagKey = tagKey,
+                                        activeWordKey = activeWordKey,
+                                        activeWordHighlightColor = activeWordHighlightColor
                                     )
 
                                     withStyle(
@@ -2585,23 +2763,70 @@ private fun MushafPageContent(
                                     .fillMaxWidth()
                                     .padding(vertical = 1.dp)
                                     .pointerInput(annotatedPageText, groupVerses) {
-                                        detectTapGestures { tapOffset ->
-                                            val layout = textLayoutResult ?: return@detectTapGestures
-                                            val charOffset = layout.getOffsetForPosition(tapOffset)
-                                            annotatedPageText.getStringAnnotations(
-                                                tag = "AYAH_TAP",
-                                                start = charOffset,
-                                                end = charOffset
-                                            ).firstOrNull()?.let { annotation ->
-                                                val parts = annotation.item.split(":")
-                                                val sNum = parts.getOrNull(0)?.toIntOrNull()
-                                                val aNum = parts.getOrNull(1)?.toIntOrNull()
-                                                val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
-                                                if (matched != null) {
-                                                    onVerseClicked(matched)
+                                        detectTapGestures(
+                                            onTap = { tapOffset ->
+                                                val layout = textLayoutResult ?: return@detectTapGestures
+                                                val charOffset = layout.getOffsetForPosition(tapOffset)
+                                                annotatedPageText.getStringAnnotations(
+                                                    tag = "AYAH_TAP",
+                                                    start = charOffset,
+                                                    end = charOffset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val parts = annotation.item.split(":")
+                                                    val sNum = parts.getOrNull(0)?.toIntOrNull()
+                                                    val aNum = parts.getOrNull(1)?.toIntOrNull()
+                                                    val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
+                                                    if (matched != null) {
+                                                        onVerseClicked(matched)
+                                                    }
+                                                }
+                                            },
+                                            onDoubleTap = { tapOffset ->
+                                                val layout = textLayoutResult ?: return@detectTapGestures
+                                                val charOffset = layout.getOffsetForPosition(tapOffset)
+                                                annotatedPageText.getStringAnnotations(
+                                                    tag = "AYAH_TAP",
+                                                    start = charOffset,
+                                                    end = charOffset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val parts = annotation.item.split(":")
+                                                    val sNum = parts.getOrNull(0)?.toIntOrNull()
+                                                    val aNum = parts.getOrNull(1)?.toIntOrNull()
+                                                    val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
+                                                    if (matched != null) {
+                                                        onVerseDoubleTapped(matched)
+                                                    }
+                                                }
+                                            },
+                                            onLongPress = { longPressOffset ->
+                                                val layout = textLayoutResult ?: return@detectTapGestures
+                                                val charOffset = layout.getOffsetForPosition(longPressOffset)
+                                                val minSearch = (charOffset - 2).coerceAtLeast(0)
+                                                val maxSearch = (charOffset + 2).coerceAtMost(annotatedPageText.length)
+                                                val wordAnnotation = annotatedPageText.getStringAnnotations(
+                                                    tag = "WORD_TAP",
+                                                    start = charOffset,
+                                                    end = charOffset
+                                                ).firstOrNull() ?: annotatedPageText.getStringAnnotations(
+                                                    tag = "WORD_TAP",
+                                                    start = minSearch,
+                                                    end = maxSearch
+                                                ).firstOrNull()
+
+                                                if (wordAnnotation != null) {
+                                                    val segments = wordAnnotation.item.split("|", limit = 3)
+                                                    val keyParts = segments.getOrNull(0)?.split(":") ?: emptyList()
+                                                    val sNum = keyParts.getOrNull(0)?.toIntOrNull()
+                                                    val aNum = keyParts.getOrNull(1)?.toIntOrNull()
+                                                    val wIdx = keyParts.getOrNull(2)?.toIntOrNull()
+                                                    val totalW = segments.getOrNull(1)?.toIntOrNull() ?: 1
+                                                    val wText = segments.getOrNull(2).orEmpty()
+                                                    if (sNum != null && aNum != null && wIdx != null && wText.isNotBlank()) {
+                                                        onWordLongPressed(sNum, aNum, wIdx, totalW, wText)
+                                                    }
                                                 }
                                             }
-                                        }
+                                        )
                                     }
                             )
                         }
@@ -2717,7 +2942,14 @@ private fun MushafPageContent(
                                     )
                                 }
 
-                                val coloredAyahText = remember(v.textAr, isNightMode, fontScaleSp, isBookmarked) {
+                                val coloredAyahText = remember(
+                                    v.textAr,
+                                    isNightMode,
+                                    fontScaleSp,
+                                    isBookmarked,
+                                    activeWordKey,
+                                    activeWordHighlightColor
+                                ) {
                                     buildAnnotatedString {
                                         appendShamarlyColoredQuranText(
                                             rawText = v.textAr,
@@ -2725,7 +2957,10 @@ private fun MushafPageContent(
                                             divineNameColor = divineNameColor,
                                             waqfColor = waqfMarkColor,
                                             bgHighlight = Color.Transparent,
-                                            fontSizeSp = fontScaleSp
+                                            fontSizeSp = fontScaleSp,
+                                            verseTagKey = tagKey,
+                                            activeWordKey = activeWordKey,
+                                            activeWordHighlightColor = activeWordHighlightColor
                                         )
                                         withStyle(
                                             SpanStyle(
@@ -2741,15 +2976,53 @@ private fun MushafPageContent(
                                     }
                                 }
 
+                                var ayahTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
                                 Text(
                                     text = coloredAyahText,
                                     inlineContent = ayahInlineContent,
+                                    onTextLayout = { ayahTextLayout = it },
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = fontScaleSp.sp,
                                     lineHeight = (fontScaleSp * 1.55f).sp,
                                     textAlign = TextAlign.Right,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .pointerInput(coloredAyahText, v) {
+                                            detectTapGestures(
+                                                onTap = { onVerseClicked(v) },
+                                                onDoubleTap = { onVerseDoubleTapped(v) },
+                                                onLongPress = { longPressOffset ->
+                                                    val layout = ayahTextLayout ?: return@detectTapGestures
+                                                    val charOffset = layout.getOffsetForPosition(longPressOffset)
+                                                    val minSearch = (charOffset - 2).coerceAtLeast(0)
+                                                    val maxSearch = (charOffset + 2).coerceAtMost(coloredAyahText.length)
+                                                    val wordAnnotation = coloredAyahText.getStringAnnotations(
+                                                        tag = "WORD_TAP",
+                                                        start = charOffset,
+                                                        end = charOffset
+                                                    ).firstOrNull() ?: coloredAyahText.getStringAnnotations(
+                                                        tag = "WORD_TAP",
+                                                        start = minSearch,
+                                                        end = maxSearch
+                                                    ).firstOrNull()
+
+                                                    if (wordAnnotation != null) {
+                                                        val segments = wordAnnotation.item.split("|", limit = 3)
+                                                        val keyParts = segments.getOrNull(0)?.split(":") ?: emptyList()
+                                                        val sNum = keyParts.getOrNull(0)?.toIntOrNull()
+                                                        val aNum = keyParts.getOrNull(1)?.toIntOrNull()
+                                                        val wIdx = keyParts.getOrNull(2)?.toIntOrNull()
+                                                        val totalW = segments.getOrNull(1)?.toIntOrNull() ?: 1
+                                                        val wText = segments.getOrNull(2).orEmpty()
+                                                        if (sNum != null && aNum != null && wIdx != null && wText.isNotBlank()) {
+                                                            onWordLongPressed(sNum, aNum, wIdx, totalW, wText)
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
                                 )
                                 if (v.tafsirMuyassar.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))

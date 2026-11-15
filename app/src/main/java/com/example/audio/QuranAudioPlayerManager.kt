@@ -4,6 +4,10 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.example.data.OfflineQuranDatabase
 import com.example.data.OfflineVerse
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +53,17 @@ data class QuranAudioPlaybackState(
     val currentRepeatIteration: Int = 1,
     val autoAdvanceNextAyah: Boolean = true,
     val errorMessage: String? = null
+)
+
+data class ActiveWordPronunciationState(
+    val wordKey: String, // "$surahNumber:$ayahNumber:$wordIndex"
+    val surahNumber: Int,
+    val ayahNumber: Int,
+    val wordIndex: Int,
+    val wordText: String,
+    val currentIteration: Int = 1,
+    val totalIterations: Int = 2,
+    val isPlaying: Boolean = true
 )
 
 object QuranAudioPlayerManager {
@@ -133,8 +148,17 @@ object QuranAudioPlayerManager {
     )
 
     private var mediaPlayer: MediaPlayer? = null
+    private var wordMediaPlayer: MediaPlayer? = null
+    private var arabicTts: TextToSpeech? = null
+    private var isTtsReady: Boolean = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var wordSliceRunnable: Runnable? = null
+
     private val _playbackState = MutableStateFlow(QuranAudioPlaybackState())
     val playbackState: StateFlow<QuranAudioPlaybackState> = _playbackState.asStateFlow()
+
+    private val _activeWordState = MutableStateFlow<ActiveWordPronunciationState?>(null)
+    val activeWordState: StateFlow<ActiveWordPronunciationState?> = _activeWordState.asStateFlow()
 
     fun initPreferences(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -441,11 +465,346 @@ object QuranAudioPlayerManager {
 
     fun stopPlayback() {
         releaseMediaPlayer()
+        stopWordPronunciation()
         _playbackState.value = _playbackState.value.copy(
             isPlaying = false,
             isLoading = false,
             currentRepeatIteration = 1
         )
+    }
+
+    /**
+     * Pronounces a single Quranic word twice consecutively (2x) when the user long-presses
+     * that specific word in the Mushaf, highlighting the word without opening any popup menu.
+     */
+    fun playSingleWordTwice(
+        context: Context,
+        surahNumber: Int,
+        ayahNumber: Int,
+        wordIndex1Based: Int,
+        wordText: String,
+        totalWordsInAyah: Int = 1
+    ) {
+        // Pause any full-ayah playback so the single word is heard clearly
+        if (_playbackState.value.isPlaying) {
+            togglePlayPause()
+        }
+        releaseWordMediaPlayerOnly()
+
+        val safeWordIdx = wordIndex1Based.coerceAtLeast(1)
+        val wordKey = "$surahNumber:$ayahNumber:$safeWordIdx"
+        _activeWordState.value = ActiveWordPronunciationState(
+            wordKey = wordKey,
+            surahNumber = surahNumber,
+            ayahNumber = ayahNumber,
+            wordIndex = safeWordIdx,
+            wordText = wordText,
+            currentIteration = 1,
+            totalIterations = 2,
+            isPlaying = true
+        )
+
+        val surah3 = String.format(Locale.US, "%03d", surahNumber.coerceIn(1, 114))
+        val ayah3 = String.format(Locale.US, "%03d", ayahNumber.coerceAtLeast(1))
+        val word3 = String.format(Locale.US, "%03d", safeWordIdx)
+
+        val primaryWbwUrl = "https://audio.qurancdn.com/wbw/${surah3}_${ayah3}_${word3}.mp3"
+        val backupWbwUrl = "https://verses.quran.com/wbw/${surah3}_${ayah3}_${word3}.mp3"
+
+        playWordFromUrlTwice(
+            context = context.applicationContext,
+            url = primaryWbwUrl,
+            fallbackUrl = backupWbwUrl,
+            wordKey = wordKey,
+            surahNumber = surahNumber,
+            ayahNumber = ayahNumber,
+            wordIndex1Based = safeWordIdx,
+            totalWordsInAyah = totalWordsInAyah.coerceAtLeast(1),
+            wordText = wordText
+        )
+    }
+
+    private fun playWordFromUrlTwice(
+        context: Context,
+        url: String,
+        fallbackUrl: String?,
+        wordKey: String,
+        surahNumber: Int,
+        ayahNumber: Int,
+        wordIndex1Based: Int,
+        totalWordsInAyah: Int,
+        wordText: String
+    ) {
+        try {
+            val mp = MediaPlayer()
+            wordMediaPlayer = mp
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            mp.setDataSource(url)
+            var currentIter = 1
+
+            mp.setOnPreparedListener { player ->
+                if (_activeWordState.value?.wordKey != wordKey) {
+                    releaseWordMediaPlayerOnly()
+                    return@setOnPreparedListener
+                }
+                _activeWordState.value = _activeWordState.value?.copy(
+                    currentIteration = 1,
+                    isPlaying = true
+                )
+                player.start()
+            }
+
+            mp.setOnCompletionListener { player ->
+                if (_activeWordState.value?.wordKey != wordKey) {
+                    releaseWordMediaPlayerOnly()
+                    return@setOnCompletionListener
+                }
+                if (currentIter < 2) {
+                    currentIter = 2
+                    val replayTask = Runnable {
+                        if (_activeWordState.value?.wordKey == wordKey && wordMediaPlayer === player) {
+                            try {
+                                _activeWordState.value = _activeWordState.value?.copy(
+                                    currentIteration = 2,
+                                    isPlaying = true
+                                )
+                                player.seekTo(0)
+                                player.start()
+                            } catch (_: Exception) {
+                                stopWordPronunciation()
+                            }
+                        }
+                    }
+                    wordSliceRunnable = replayTask
+                    mainHandler.postDelayed(replayTask, 280L)
+                } else {
+                    val clearTask = Runnable {
+                        if (_activeWordState.value?.wordKey == wordKey) {
+                            stopWordPronunciation()
+                        }
+                    }
+                    wordSliceRunnable = clearTask
+                    mainHandler.postDelayed(clearTask, 180L)
+                }
+            }
+
+            mp.setOnErrorListener { _, _, _ ->
+                releaseWordMediaPlayerOnly()
+                if (fallbackUrl != null) {
+                    playWordFromUrlTwice(
+                        context = context,
+                        url = fallbackUrl,
+                        fallbackUrl = null,
+                        wordKey = wordKey,
+                        surahNumber = surahNumber,
+                        ayahNumber = ayahNumber,
+                        wordIndex1Based = wordIndex1Based,
+                        totalWordsInAyah = totalWordsInAyah,
+                        wordText = wordText
+                    )
+                } else {
+                    // Fallback to slicing the selected reciter's Ayah stream or offline Arabic TTS
+                    playWordFromReciterAyahSliceOrTts(
+                        context = context,
+                        wordKey = wordKey,
+                        surahNumber = surahNumber,
+                        ayahNumber = ayahNumber,
+                        wordIndex1Based = wordIndex1Based,
+                        totalWordsInAyah = totalWordsInAyah,
+                        wordText = wordText
+                    )
+                }
+                true
+            }
+
+            mp.prepareAsync()
+        } catch (_: Exception) {
+            playWordFromReciterAyahSliceOrTts(
+                context = context,
+                wordKey = wordKey,
+                surahNumber = surahNumber,
+                ayahNumber = ayahNumber,
+                wordIndex1Based = wordIndex1Based,
+                totalWordsInAyah = totalWordsInAyah,
+                wordText = wordText
+            )
+        }
+    }
+
+    private fun playWordFromReciterAyahSliceOrTts(
+        context: Context,
+        wordKey: String,
+        surahNumber: Int,
+        ayahNumber: Int,
+        wordIndex1Based: Int,
+        totalWordsInAyah: Int,
+        wordText: String
+    ) {
+        try {
+            val reciter = _playbackState.value.selectedReciter
+            val ayahUrl = reciter.getAyahStreamUrl(surahNumber, ayahNumber)
+            val mp = MediaPlayer()
+            wordMediaPlayer = mp
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            mp.setDataSource(ayahUrl)
+            mp.setOnPreparedListener { player ->
+                if (_activeWordState.value?.wordKey != wordKey) {
+                    releaseWordMediaPlayerOnly()
+                    return@setOnPreparedListener
+                }
+                val totalDur = player.duration.coerceAtLeast(1200)
+                val safeTotalWords = totalWordsInAyah.coerceAtLeast(1)
+                val sliceDuration = (totalDur.toFloat() / safeTotalWords.toFloat()).toInt().coerceIn(650, 2600)
+                val startMs = (((wordIndex1Based - 1).coerceAtLeast(0).toFloat() / safeTotalWords.toFloat()) * totalDur)
+                    .toInt()
+                    .coerceIn(0, (totalDur - 400).coerceAtLeast(0))
+
+                _activeWordState.value = _activeWordState.value?.copy(currentIteration = 1, isPlaying = true)
+                player.seekTo(startMs)
+                player.start()
+
+                val firstStopRunnable = Runnable {
+                    if (_activeWordState.value?.wordKey == wordKey && wordMediaPlayer === player) {
+                        try {
+                            if (player.isPlaying) player.pause()
+                            val secondPlayRunnable = Runnable {
+                                if (_activeWordState.value?.wordKey == wordKey && wordMediaPlayer === player) {
+                                    try {
+                                        _activeWordState.value = _activeWordState.value?.copy(
+                                            currentIteration = 2,
+                                            isPlaying = true
+                                        )
+                                        player.seekTo(startMs)
+                                        player.start()
+                                        val finalStopRunnable = Runnable {
+                                            if (_activeWordState.value?.wordKey == wordKey) {
+                                                stopWordPronunciation()
+                                            }
+                                        }
+                                        wordSliceRunnable = finalStopRunnable
+                                        mainHandler.postDelayed(finalStopRunnable, sliceDuration.toLong())
+                                    } catch (_: Exception) {
+                                        stopWordPronunciation()
+                                    }
+                                }
+                            }
+                            wordSliceRunnable = secondPlayRunnable
+                            mainHandler.postDelayed(secondPlayRunnable, 280L)
+                        } catch (_: Exception) {
+                            stopWordPronunciation()
+                        }
+                    }
+                }
+                wordSliceRunnable = firstStopRunnable
+                mainHandler.postDelayed(firstStopRunnable, sliceDuration.toLong())
+            }
+            mp.setOnErrorListener { _, _, _ ->
+                releaseWordMediaPlayerOnly()
+                speakWordTwiceViaTts(context, wordKey, wordText)
+                true
+            }
+            mp.prepareAsync()
+        } catch (_: Exception) {
+            speakWordTwiceViaTts(context, wordKey, wordText)
+        }
+    }
+
+    private fun speakWordTwiceViaTts(context: Context, wordKey: String, wordText: String) {
+        val invokeSpeak = {
+            val tts = arabicTts
+            if (tts != null && _activeWordState.value?.wordKey == wordKey) {
+                tts.setSpeechRate(0.82f)
+                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        if (utteranceId == "WORD_2") {
+                            _activeWordState.value = _activeWordState.value?.copy(
+                                currentIteration = 2,
+                                isPlaying = true
+                            )
+                        }
+                    }
+
+                    override fun onDone(utteranceId: String?) {
+                        if (utteranceId == "WORD_2" && _activeWordState.value?.wordKey == wordKey) {
+                            mainHandler.postDelayed({
+                                if (_activeWordState.value?.wordKey == wordKey) {
+                                    stopWordPronunciation()
+                                }
+                            }, 200L)
+                        }
+                    }
+
+                    override fun onError(utteranceId: String?) {
+                        if (_activeWordState.value?.wordKey == wordKey) {
+                            stopWordPronunciation()
+                        }
+                    }
+                })
+                tts.speak(wordText, TextToSpeech.QUEUE_FLUSH, null, "WORD_1")
+                tts.playSilentUtterance(300L, TextToSpeech.QUEUE_ADD, "WORD_PAUSE")
+                tts.speak(wordText, TextToSpeech.QUEUE_ADD, null, "WORD_2")
+            } else {
+                mainHandler.postDelayed({
+                    if (_activeWordState.value?.wordKey == wordKey) {
+                        stopWordPronunciation()
+                    }
+                }, 1500L)
+            }
+        }
+
+        if (arabicTts != null && isTtsReady) {
+            invokeSpeak()
+        } else {
+            arabicTts = TextToSpeech(context.applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    arabicTts?.language = Locale("ar")
+                    isTtsReady = true
+                    invokeSpeak()
+                } else {
+                    mainHandler.postDelayed({
+                        if (_activeWordState.value?.wordKey == wordKey) {
+                            stopWordPronunciation()
+                        }
+                    }, 1500L)
+                }
+            }
+        }
+    }
+
+    fun stopWordPronunciation() {
+        releaseWordMediaPlayerOnly()
+        try {
+            arabicTts?.stop()
+        } catch (_: Exception) {
+        }
+        _activeWordState.value = null
+    }
+
+    private fun releaseWordMediaPlayerOnly() {
+        wordSliceRunnable?.let { mainHandler.removeCallbacks(it) }
+        wordSliceRunnable = null
+        try {
+            wordMediaPlayer?.let { mp ->
+                if (mp.isPlaying) {
+                    mp.stop()
+                }
+                mp.reset()
+                mp.release()
+            }
+        } catch (_: Exception) {
+        } finally {
+            wordMediaPlayer = null
+        }
     }
 
     private fun releaseMediaPlayer() {

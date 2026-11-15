@@ -771,9 +771,21 @@ object PrayerTimesAndAdhanManager {
     fun scheduleAllFivePrayers(context: Context, settings: AdhanSettingsState = loadSettings(context)) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val slots = calculateDailyPrayerTimes(settings)
+        val nowMillis = System.currentTimeMillis()
 
         for (slot in slots) {
             val requestCode = ("adhan_${slot.prayer.id}").hashCode()
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, slot.hour)
+                set(Calendar.MINUTE, slot.minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                // Add 30-second guard so past or borderline alarms are always scheduled for tomorrow
+                if (timeInMillis <= nowMillis + 30_000L) {
+                    add(Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+
             val intent = Intent(context, MihrabiAlarmReceiver::class.java).apply {
                 action = ACTION_TRIGGER_PRAYER_ADHAN
                 putExtra("prayerId", slot.prayer.id)
@@ -781,6 +793,9 @@ object PrayerTimesAndAdhanManager {
                 putExtra("alertMode", slot.alertMode.name)
                 putExtra("customAdhanUri", settings.customAdhanUri)
                 putExtra("locationName", settings.locationName)
+                putExtra("scheduledHour", slot.hour)
+                putExtra("scheduledMinute", slot.minute)
+                putExtra("scheduledTriggerMillis", cal.timeInMillis)
             }
 
             val pendingIntent = PendingIntent.getBroadcast(
@@ -790,22 +805,14 @@ object PrayerTimesAndAdhanManager {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            if (slot.alertMode == AdhanAlertMode.OFF) {
-                try {
-                    alarmManager.cancel(pendingIntent)
-                } catch (_: Exception) {
-                }
-                continue
+            // Always cancel any stale pending alarm first before setting the updated one
+            try {
+                alarmManager.cancel(pendingIntent)
+            } catch (_: Exception) {
             }
 
-            val cal = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, slot.hour)
-                set(Calendar.MINUTE, slot.minute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-                if (timeInMillis <= System.currentTimeMillis()) {
-                    add(Calendar.DAY_OF_YEAR, 1)
-                }
+            if (slot.alertMode == AdhanAlertMode.OFF) {
+                continue
             }
 
             try {
@@ -860,12 +867,20 @@ object PrayerTimesAndAdhanManager {
         )
     }
 
+    private fun circularMinuteDifference(minA: Int, minB: Int): Int {
+        val rawDiff = abs(minA - minB)
+        return minOf(rawDiff, 24 * 60 - rawDiff)
+    }
+
     fun handleTriggeredAdhanBroadcast(context: Context, intent: Intent) {
         val prayerId = intent.getStringExtra("prayerId") ?: "fajr"
         val prayerNameAr = intent.getStringExtra("prayerNameAr") ?: "الصلاة"
         val alertModeStr = intent.getStringExtra("alertMode") ?: AdhanAlertMode.FULL_ADHAN.name
         val customUri = intent.getStringExtra("customAdhanUri") ?: ""
         val locationName = intent.getStringExtra("locationName") ?: ""
+        val scheduledHour = intent.getIntExtra("scheduledHour", -1)
+        val scheduledMinute = intent.getIntExtra("scheduledMinute", -1)
+        val scheduledTriggerMillis = intent.getLongExtra("scheduledTriggerMillis", -1L)
 
         val alertMode = try {
             AdhanAlertMode.valueOf(alertModeStr)
@@ -874,6 +889,59 @@ object PrayerTimesAndAdhanManager {
         }
 
         if (alertMode == AdhanAlertMode.OFF) return
+
+        val nowCal = Calendar.getInstance()
+        val nowMillis = nowCal.timeInMillis
+        val nowMinutesOfDay = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+        val todayDateKey = String.format(
+            Locale.US,
+            "%04d-%02d-%02d",
+            nowCal.get(Calendar.YEAR),
+            nowCal.get(Calendar.MONTH) + 1,
+            nowCal.get(Calendar.DAY_OF_MONTH)
+        )
+
+        // 1. Real-Time Verification Gate against today's actual calculated prayer time
+        // Prevents Infinix XOS / Doze mode from firing deferred yesterday alarms or premature inexact alarms
+        val currentSettings = loadSettings(context)
+        val todaySlots = calculateDailyPrayerTimes(currentSettings, nowCal)
+        val matchingSlot = todaySlots.find { it.prayer.id == prayerId }
+        val expectedMinutesOfDay = when {
+            matchingSlot != null -> matchingSlot.hour * 60 + matchingSlot.minute
+            scheduledHour in 0..23 && scheduledMinute in 0..59 -> scheduledHour * 60 + scheduledMinute
+            else -> nowMinutesOfDay
+        }
+
+        val minuteDiffFromExpected = circularMinuteDifference(nowMinutesOfDay, expectedMinutesOfDay)
+        if (minuteDiffFromExpected > 10) {
+            Log.w(
+                TAG,
+                "Ignoring premature/deferred Adhan broadcast for $prayerId at ${nowCal.get(Calendar.HOUR_OF_DAY)}:${nowCal.get(Calendar.MINUTE)} " +
+                    "(expected ${expectedMinutesOfDay / 60}:${expectedMinutesOfDay % 60}, diff=$minuteDiffFromExpected min)"
+            )
+            scheduleAllFivePrayers(context, currentSettings)
+            return
+        }
+
+        // 2. Timestamp Verification Gate (if scheduledTriggerMillis was provided, ensure it's within ±12 minutes of now)
+        if (scheduledTriggerMillis > 0L && abs(nowMillis - scheduledTriggerMillis) > 12 * 60 * 1000L) {
+            Log.w(
+                TAG,
+                "Ignoring stale Adhan broadcast for $prayerId (scheduledMillis=$scheduledTriggerMillis, nowMillis=$nowMillis)"
+            )
+            scheduleAllFivePrayers(context, currentSettings)
+            return
+        }
+
+        // 3. Once-Per-Day Guard so the same prayer Adhan never triggers twice on the same date
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastFiredKey = "last_fired_date_$prayerId"
+        if (prefs.getString(lastFiredKey, "") == todayDateKey) {
+            Log.w(TAG, "Adhan for $prayerId already fired today ($todayDateKey); skipping duplicate.")
+            scheduleAllFivePrayers(context, currentSettings)
+            return
+        }
+        prefs.edit().putString(lastFiredKey, todayDateKey).apply()
 
         ensureAdhanNotificationChannel(context)
         playAdhanAudio(context, alertMode, customUri)
@@ -933,7 +1001,7 @@ object PrayerTimesAndAdhanManager {
         }
 
         // Reschedule all 5 prayers for tomorrow
-        scheduleAllFivePrayers(context)
+        scheduleAllFivePrayers(context, currentSettings)
     }
 
     private fun ensureAdhanNotificationChannel(context: Context) {
