@@ -38,7 +38,7 @@ enum class PrayerKey(val id: String, val arabicName: String, val iconEmoji: Stri
 }
 
 enum class AdhanAlertMode(val titleAr: String, val descriptionAr: String) {
-    FULL_ADHAN("أذان كامل (الصوت المرفق)", "تشغيل صوت الأذان الشرعي الكامل المرفق بالتطبيق"),
+    FULL_ADHAN("أذان كامل (الصوت المرفق)", "تشغيل الأذان الشرعي الكامل (وللفجر: الأذان المصري الكامل مع «الصلاة خير من النوم»)"),
     SHORT_ADHAN("مختصر أذان (التكبيرات فقط)", "تشغيل تكبيرات الأذان الأولى فقط (١٢ ثانية)"),
     NOTIFICATION_ONLY("مجرد إشعار فقط (بدون أذان)", "إظهار إشعار دخول وقت الصلاة مع تنبيه خفيف بدون أذان مطول"),
     CUSTOM_UPLOADED("نغمة أذان مخصصة من الهاتف", "اختيار ملف صوتي مخصص (مثل مختصر أذان أو مؤذن آخر) من ملفات هاتفك"),
@@ -831,12 +831,39 @@ object PrayerTimesAndAdhanManager {
     }
 
     /**
+     * Extracts and caches the bundled offline Egyptian Fajr Adhan (`assets/adhan_fajr_egypt_b64.txt`)
+     * into `filesDir/adhan_fajr_egypt.mp3` and returns its local file URI string.
+     */
+    private fun ensureEgyptianFajrAdhanUri(context: Context): String {
+        return try {
+            val outFile = java.io.File(context.filesDir, "adhan_fajr_egypt.mp3")
+            if (!outFile.exists() || outFile.length() < 100_000L) {
+                val b64Content = context.assets.open("adhan_fajr_egypt_b64.txt")
+                    .bufferedReader(Charsets.UTF_8)
+                    .useLines { lines ->
+                        lines.filter { it.isNotBlank() && !it.startsWith("#") }
+                            .joinToString("")
+                    }
+                val audioBytes = android.util.Base64.decode(b64Content, android.util.Base64.DEFAULT)
+                outFile.writeBytes(audioBytes)
+            }
+            Uri.fromFile(outFile).toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract offline Egyptian Fajr Adhan from assets", e)
+            ""
+        }
+    }
+
+    /**
      * Plays the Adhan sound according to the selected [AdhanAlertMode].
+     * When [mode] is [AdhanAlertMode.FULL_ADHAN] and [prayerId] is "fajr", plays the dedicated
+     * Egyptian Fajr Adhan (`adhan_fajr_egypt_b64.txt` -> `adhan_fajr_egypt.mp3`) containing "الصلاة خير من النوم".
      */
     fun playAdhanAudio(
         context: Context,
         mode: AdhanAlertMode,
-        customUri: String = ""
+        customUri: String = "",
+        prayerId: String = ""
     ) {
         MihrabiAlarmManager.stopRingtone()
         if (mode == AdhanAlertMode.OFF) return
@@ -851,18 +878,33 @@ object PrayerTimesAndAdhanManager {
             return
         }
 
-        val durationMs = when (mode) {
-            AdhanAlertMode.FULL_ADHAN -> 165_000L // Full 2:33 Adhan
-            AdhanAlertMode.SHORT_ADHAN -> 12_500L // First 12.5 seconds ("Allahu Akbar Allahu Akbar")
-            AdhanAlertMode.CUSTOM_UPLOADED -> 180_000L
-            AdhanAlertMode.ISLAMIC_NASHEED -> 55_000L
+        val isFajrFullAdhan = mode == AdhanAlertMode.FULL_ADHAN && prayerId.equals(PrayerKey.FAJR.id, ignoreCase = true)
+
+        val durationMs = when {
+            isFajrFullAdhan -> 248_000L // Full 4:06 Egyptian Fajr Adhan with "الصلاة خير من النوم"
+            mode == AdhanAlertMode.FULL_ADHAN -> 165_000L // Full 2:33 Adhan for Dhuhr/Asr/Maghrib/Isha
+            mode == AdhanAlertMode.SHORT_ADHAN -> 12_500L // First 12.5 seconds ("Allahu Akbar Allahu Akbar")
+            mode == AdhanAlertMode.CUSTOM_UPLOADED -> 180_000L
+            mode == AdhanAlertMode.ISLAMIC_NASHEED -> 55_000L
             else -> 30_000L
+        }
+
+        val rawResId = if (mode == AdhanAlertMode.ISLAMIC_NASHEED) {
+            R.raw.islamic_alarm_nasheed
+        } else {
+            R.raw.adhan_makkah_full
+        }
+
+        val effectiveCustomUri = when {
+            mode == AdhanAlertMode.CUSTOM_UPLOADED -> customUri
+            isFajrFullAdhan -> ensureEgyptianFajrAdhanUri(context)
+            else -> ""
         }
 
         MihrabiAlarmManager.playRawOrUriAudio(
             context = context,
-            rawResId = if (mode == AdhanAlertMode.ISLAMIC_NASHEED) R.raw.islamic_alarm_nasheed else R.raw.adhan_makkah_full,
-            customUri = if (mode == AdhanAlertMode.CUSTOM_UPLOADED) customUri else "",
+            rawResId = rawResId,
+            customUri = effectiveCustomUri,
             durationMillis = durationMs
         )
     }
@@ -944,7 +986,7 @@ object PrayerTimesAndAdhanManager {
         prefs.edit().putString(lastFiredKey, todayDateKey).apply()
 
         ensureAdhanNotificationChannel(context)
-        playAdhanAudio(context, alertMode, customUri)
+        playAdhanAudio(context, alertMode, customUri, prayerId = prayerId)
 
         val notifId = ("adhan_notif_$prayerId").hashCode()
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
@@ -968,8 +1010,13 @@ object PrayerTimesAndAdhanManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val isFajr = prayerId.equals(PrayerKey.FAJR.id, ignoreCase = true)
         val modeLabel = when (alertMode) {
-            AdhanAlertMode.FULL_ADHAN -> "حي على الصلاة • حي على الفلاح (أذان كامل)"
+            AdhanAlertMode.FULL_ADHAN -> if (isFajr) {
+                "حي على الفلاح • الصلاة خير من النوم (أذان الفجر المصري الكامل)"
+            } else {
+                "حي على الصلاة • حي على الفلاح (أذان كامل)"
+            }
             AdhanAlertMode.SHORT_ADHAN -> "الله أكبر الله أكبر (مختصر الأذان)"
             AdhanAlertMode.NOTIFICATION_ONLY -> "حان الآن وقت صلاة $prayerNameAr"
             AdhanAlertMode.CUSTOM_UPLOADED -> "حي على الصلاة (نغمة الأذان المخصصة)"

@@ -289,8 +289,16 @@ fun PrayerTimesAndAdhanCard(
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(3.dp))
+                        val nextModeBadgeText = if (
+                            nextPrayerSlot.prayer == PrayerKey.FAJR &&
+                            nextPrayerSlot.alertMode == AdhanAlertMode.FULL_ADHAN
+                        ) {
+                            "أذان الفجر المصري الكامل • الصلاة خير من النوم"
+                        } else {
+                            nextPrayerSlot.alertMode.titleAr
+                        }
                         Text(
-                            text = "$remainingText • (${nextPrayerSlot.alertMode.titleAr})",
+                            text = "$remainingText • ($nextModeBadgeText)",
                             color = Color(0xFF1A110B).copy(alpha = 0.85f),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 11.5.sp,
@@ -421,7 +429,8 @@ fun PrayerTimesAndAdhanCard(
                                     AdhanAlertMode.FULL_ADHAN
                                 else
                                     settings.globalAlertMode,
-                                customUri = settings.customAdhanUri
+                                customUri = settings.customAdhanUri,
+                                prayerId = nextPrayerSlot.prayer.id
                             )
                             isPlayingPreview = true
                         }
@@ -912,7 +921,7 @@ fun AdhanSettingsDialog(
                     }
                 }
 
-                // Live Preview Button inside Dialog
+                // Live Preview Buttons inside Dialog (Standard Adhan + Egyptian Fajr Adhan)
                 OutlinedButton(
                     onClick = {
                         if (isPreviewPlaying) {
@@ -922,7 +931,8 @@ fun AdhanSettingsDialog(
                             PrayerTimesAndAdhanManager.playAdhanAudio(
                                 context = context,
                                 mode = if (draft.globalAlertMode == AdhanAlertMode.OFF) AdhanAlertMode.FULL_ADHAN else draft.globalAlertMode,
-                                customUri = draft.customAdhanUri
+                                customUri = draft.customAdhanUri,
+                                prayerId = focusedPrayer?.id ?: ""
                             )
                             isPreviewPlaying = true
                         }
@@ -941,6 +951,38 @@ fun AdhanSettingsDialog(
                         text = if (isPreviewPlaying) "إيقاف معاينة صوت الأذان" else "معاينة وسماع صوت الأذان المختار الآن",
                         color = if (isPreviewPlaying) MaterialTheme.colorScheme.error else GoldAccent,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (isPreviewPlaying) {
+                            MihrabiAlarmManager.stopRingtone()
+                            isPreviewPlaying = false
+                        } else {
+                            PrayerTimesAndAdhanManager.playAdhanAudio(
+                                context = context,
+                                mode = AdhanAlertMode.FULL_ADHAN,
+                                prayerId = PrayerKey.FAJR.id
+                            )
+                            isPreviewPlaying = true
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, EmeraldGreen),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = if (isPreviewPlaying) Icons.Default.StopCircle else Icons.Default.VolumeUp,
+                        contentDescription = null,
+                        tint = EmeraldGreen
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isPreviewPlaying) "إيقاف أذان الفجر المصري" else "🌅 سماع أذان الفجر المصري (الصلاة خير من النوم)",
+                        color = EmeraldGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
                     )
                 }
 
@@ -1012,8 +1054,13 @@ fun AdhanSettingsDialog(
                                     EmeraldGreen.copy(alpha = 0.2f),
                                 border = BorderStroke(0.8.dp, if (currentMode == AdhanAlertMode.OFF) Color.Gray else EmeraldGreen)
                             ) {
+                                val perPrayerTitle = if (slot.prayer == PrayerKey.FAJR && currentMode == AdhanAlertMode.FULL_ADHAN) {
+                                    "أذان مصري كامل (الصلاة خير من النوم)"
+                                } else {
+                                    currentMode.titleAr
+                                }
                                 Text(
-                                    text = currentMode.titleAr,
+                                    text = perPrayerTitle,
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (currentMode == AdhanAlertMode.OFF) Color.LightGray else EmeraldGreen,

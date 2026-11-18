@@ -43,8 +43,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -2219,7 +2221,12 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
     val totalWordsInAyah = if (verseTagKey.isNotEmpty()) countSpokenWordsInAyah(rawText) else 1
     var spokenWordCounter = 0
 
-    // Split preserving whitespace segments so word boundaries remain exact
+    // IMPORTANT: Avoid setting fontFamily, fontSize, or fontWeight on inner SpanStyles here!
+    // In Android's StaticLayout / TextLine, any MetricAffectingSpan (TypefaceSpan, AbsoluteSizeSpan, StyleSpan)
+    // splits the HarfBuzz shaping run at the span boundary, which breaks OpenType GPOS mark-to-base anchoring
+    // between a Quranic word and its trailing Uthmani Waqf mark (\u06D6..\u06DC: ۖ ۗ ۘ ۙ ۚ) and causes
+    // combining Waqf marks at the end of a line to detach or jump to the right margin.
+    // By only setting color & background (non-metric spans), HarfBuzz shapes the word + its Waqf mark in one run.
     var index = 0
     val len = rawText.length
     while (index < len) {
@@ -2233,10 +2240,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
             withStyle(
                 SpanStyle(
                     color = baseTextColor,
-                    background = bgHighlight,
-                    fontFamily = AmiriFontFamily,
-                    fontSize = fontSizeSp.sp,
-                    fontWeight = FontWeight.Bold
+                    background = bgHighlight
                 )
             ) {
                 append(token)
@@ -2251,10 +2255,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                 withStyle(
                     SpanStyle(
                         color = waqfColor,
-                        background = bgHighlight,
-                        fontFamily = AmiriFontFamily,
-                        fontSize = fontSizeSp.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        background = bgHighlight
                     )
                 ) {
                     append("۞ ")
@@ -2300,10 +2301,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                     withStyle(
                         SpanStyle(
                             color = wordColor,
-                            background = effectiveWordBg,
-                            fontFamily = AmiriFontFamily,
-                            fontSize = fontSizeSp.sp,
-                            fontWeight = if (isDivineName || isWordPronouncing) FontWeight.ExtraBold else FontWeight.Bold
+                            background = effectiveWordBg
                         )
                     ) {
                         append(coreWord)
@@ -2319,10 +2317,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                         withStyle(
                             SpanStyle(
                                 color = waqfColor,
-                                background = bgHighlight,
-                                fontFamily = AmiriFontFamily,
-                                fontSize = fontSizeSp.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                background = bgHighlight
                             )
                         ) {
                             append(nonSajdahWaqf)
@@ -2332,13 +2327,10 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                         withStyle(
                             SpanStyle(
                                 color = divineNameColor,
-                                background = bgHighlight,
-                                fontFamily = AmiriFontFamily,
-                                fontSize = fontSizeSp.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                background = bgHighlight
                             )
                         ) {
-                            append(" ۩")
+                            append("\u00A0۩")
                         }
                     }
                 }
@@ -2578,9 +2570,9 @@ private fun MushafPageContent(
                                     }
                                     val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
                                     if (isBookmarked) {
-                                        append(" ﴿${toArabicIndicDigits(v.ayahNumber)}﴾  ")
+                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾\u00A0٠٠ ")
                                     } else {
-                                        append(" ﴿${toArabicIndicDigits(v.ayahNumber)}﴾ ")
+                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾ ")
                                     }
                                 }
                             }
@@ -2629,22 +2621,6 @@ private fun MushafPageContent(
                     val effectiveLineHeightSp = displayFontSp * 1.32f
                     val isZoomScrollEnabled = fontZoomStep in 1..3
                     val pageScrollState = rememberScrollState()
-
-                    val waqfInlineContent = remember(displayFontSp) {
-                        mapOf(
-                            "WAQF_RIBBON" to InlineTextContent(
-                                placeholder = Placeholder(
-                                    width = (displayFontSp * 0.62f).sp,
-                                    height = (displayFontSp * 1.25f).sp,
-                                    placeholderVerticalAlign = PlaceholderVerticalAlign.Center
-                                )
-                            ) {
-                                WaqfGreenRibbonBadge(
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        )
-                    }
 
                     // Single-Page Column (Auto-fits 100% of page when fontZoomStep == 0, or scrolls smoothly when user enlarges font via Tt)
                     Column(
@@ -2729,16 +2705,37 @@ private fun MushafPageContent(
                                                 isNightMode -> GoldAccent
                                                 else -> Color(0xFF9A6F0B)
                                             },
-                                            background = bgHighlight,
-                                            fontFamily = AmiriFontFamily,
-                                            fontSize = (displayFontSp - 1.5f).coerceAtLeast(12f).sp,
-                                            fontWeight = FontWeight.ExtraBold
+                                            background = bgHighlight
                                         )
                                     ) {
-                                        append(" ﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
-                                        if (isBookmarked) {
-                                            appendInlineContent("WAQF_RIBBON", "[علامة وقف]")
+                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                    }
+                                    if (isBookmarked) {
+                                        withStyle(
+                                            style = SpanStyle(
+                                                color = Color.Transparent,
+                                                background = bgHighlight
+                                            )
+                                        ) {
+                                            append("\u00A0")
                                         }
+                                        pushStringAnnotation(tag = "WAQF_RIBBON_ANCHOR", annotation = tagKey)
+                                        withStyle(
+                                            style = SpanStyle(
+                                                color = Color.Transparent,
+                                                background = bgHighlight
+                                            )
+                                        ) {
+                                            append("٠٠")
+                                        }
+                                        pop()
+                                    }
+                                    withStyle(
+                                        style = SpanStyle(
+                                            color = textColor,
+                                            background = Color.Transparent
+                                        )
+                                    ) {
                                         append(" ")
                                     }
                                     pop()
@@ -2749,7 +2746,6 @@ private fun MushafPageContent(
 
                             Text(
                                 text = annotatedPageText,
-                                inlineContent = waqfInlineContent,
                                 onTextLayout = { textLayoutResult = it },
                                 style = TextStyle(
                                     fontFamily = AmiriFontFamily,
@@ -2762,6 +2758,37 @@ private fun MushafPageContent(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 1.dp)
+                                    .drawWithContent {
+                                        drawContent()
+                                        val layout = textLayoutResult ?: return@drawWithContent
+                                        val ribbonAnns = annotatedPageText.getStringAnnotations(
+                                            tag = "WAQF_RIBBON_ANCHOR",
+                                            start = 0,
+                                            end = annotatedPageText.length
+                                        )
+                                        for (ann in ribbonAnns) {
+                                            if (ann.start < ann.end && ann.end <= annotatedPageText.length) {
+                                                val box0 = layout.getBoundingBox(ann.start)
+                                                val box1 = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
+                                                val minLeft = minOf(box0.left, box1.left)
+                                                val maxRight = maxOf(box0.right, box1.right)
+                                                val lineIdx = layout.getLineForOffset(ann.start)
+                                                val lineTop = layout.getLineTop(lineIdx)
+                                                val lineBottom = layout.getLineBottom(lineIdx)
+                                                val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
+                                                val ribbonH = lineH * 0.86f
+                                                val ribbonW = (maxRight - minLeft).coerceAtLeast(lineH * 0.44f)
+                                                val cx = (minLeft + maxRight) * 0.5f
+                                                val cy = (lineTop + lineBottom) * 0.5f
+                                                drawWaqfGreenRibbonOnCanvas(
+                                                    left = cx - ribbonW * 0.5f,
+                                                    top = cy - ribbonH * 0.5f,
+                                                    width = ribbonW,
+                                                    height = ribbonH
+                                                )
+                                            }
+                                        }
+                                    }
                                     .pointerInput(annotatedPageText, groupVerses) {
                                         detectTapGestures(
                                             onTap = { tapOffset ->
@@ -2926,22 +2953,6 @@ private fun MushafPageContent(
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
 
-                                val ayahInlineContent = remember(fontScaleSp) {
-                                    mapOf(
-                                        "WAQF_RIBBON" to InlineTextContent(
-                                            placeholder = Placeholder(
-                                                width = (fontScaleSp * 0.62f).sp,
-                                                height = (fontScaleSp * 1.25f).sp,
-                                                placeholderVerticalAlign = PlaceholderVerticalAlign.Center
-                                            )
-                                        ) {
-                                            WaqfGreenRibbonBadge(
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        }
-                                    )
-                                }
-
                                 val coloredAyahText = remember(
                                     v.textAr,
                                     isNightMode,
@@ -2964,14 +2975,20 @@ private fun MushafPageContent(
                                         )
                                         withStyle(
                                             SpanStyle(
-                                                color = if (isBookmarked) EmeraldGreen else if (isNightMode) GoldAccent else Color(0xFF9A6F0B),
-                                                fontWeight = FontWeight.ExtraBold
+                                                color = if (isBookmarked) EmeraldGreen else if (isNightMode) GoldAccent else Color(0xFF9A6F0B)
                                             )
                                         ) {
-                                            append(" ﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
-                                            if (isBookmarked) {
-                                                appendInlineContent("WAQF_RIBBON", "[علامة وقف]")
+                                            append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                        }
+                                        if (isBookmarked) {
+                                            withStyle(SpanStyle(color = Color.Transparent)) {
+                                                append("\u00A0")
                                             }
+                                            pushStringAnnotation(tag = "WAQF_RIBBON_ANCHOR", annotation = tagKey)
+                                            withStyle(SpanStyle(color = Color.Transparent)) {
+                                                append("٠٠")
+                                            }
+                                            pop()
                                         }
                                     }
                                 }
@@ -2980,7 +2997,6 @@ private fun MushafPageContent(
 
                                 Text(
                                     text = coloredAyahText,
-                                    inlineContent = ayahInlineContent,
                                     onTextLayout = { ayahTextLayout = it },
                                     fontFamily = AmiriFontFamily,
                                     fontWeight = FontWeight.Bold,
@@ -2989,6 +3005,37 @@ private fun MushafPageContent(
                                     textAlign = TextAlign.Right,
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .drawWithContent {
+                                            drawContent()
+                                            val layout = ayahTextLayout ?: return@drawWithContent
+                                            val ribbonAnns = coloredAyahText.getStringAnnotations(
+                                                tag = "WAQF_RIBBON_ANCHOR",
+                                                start = 0,
+                                                end = coloredAyahText.length
+                                            )
+                                            for (ann in ribbonAnns) {
+                                                if (ann.start < ann.end && ann.end <= coloredAyahText.length) {
+                                                    val box0 = layout.getBoundingBox(ann.start)
+                                                    val box1 = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
+                                                    val minLeft = minOf(box0.left, box1.left)
+                                                    val maxRight = maxOf(box0.right, box1.right)
+                                                    val lineIdx = layout.getLineForOffset(ann.start)
+                                                    val lineTop = layout.getLineTop(lineIdx)
+                                                    val lineBottom = layout.getLineBottom(lineIdx)
+                                                    val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
+                                                    val ribbonH = lineH * 0.86f
+                                                    val ribbonW = (maxRight - minLeft).coerceAtLeast(lineH * 0.44f)
+                                                    val cx = (minLeft + maxRight) * 0.5f
+                                                    val cy = (lineTop + lineBottom) * 0.5f
+                                                    drawWaqfGreenRibbonOnCanvas(
+                                                        left = cx - ribbonW * 0.5f,
+                                                        top = cy - ribbonH * 0.5f,
+                                                        width = ribbonW,
+                                                        height = ribbonH
+                                                    )
+                                                }
+                                            }
+                                        }
                                         .pointerInput(coloredAyahText, v) {
                                             detectTapGestures(
                                                 onTap = { onVerseClicked(v) },
@@ -3204,80 +3251,95 @@ private fun SurahOrnamentalBanner(
     }
 }
 
+private fun DrawScope.drawWaqfGreenRibbonOnCanvas(
+    left: Float,
+    top: Float,
+    width: Float,
+    height: Float
+) {
+    val w = width
+    val h = height
+    val cx = left + w * 0.5f
+
+    val goldOuter = Color(0xFFD9B863)
+    val goldBright = Color(0xFFE5C878)
+    val emeraldDark = Color(0xFF065535)
+    val emeraldMid = Color(0xFF0B6E45)
+    val emeraldCore = Color(0xFF043D26)
+
+    // 1. Vertical Green Ribbon Body with Swallowtail V-Notch at bottom
+    val ribbonLeft = left + w * 0.24f
+    val ribbonRight = left + w * 0.76f
+    val ribbonTop = top + h * 0.24f
+    val ribbonBottom = top + h * 0.96f
+    val ribbonNotchY = top + h * 0.88f
+
+    val outerRibbonPath = androidx.compose.ui.graphics.Path().apply {
+        moveTo(ribbonLeft, ribbonTop)
+        lineTo(ribbonRight, ribbonTop)
+        lineTo(ribbonRight, ribbonBottom)
+        lineTo(cx, ribbonNotchY)
+        lineTo(ribbonLeft, ribbonBottom)
+        close()
+    }
+    drawPath(path = outerRibbonPath, color = emeraldDark)
+
+    val innerMargin = w * 0.055f
+    val innerRibbonPath = androidx.compose.ui.graphics.Path().apply {
+        moveTo(ribbonLeft + innerMargin, ribbonTop)
+        lineTo(ribbonRight - innerMargin, ribbonTop)
+        lineTo(ribbonRight - innerMargin, ribbonBottom - h * 0.02f)
+        lineTo(cx, ribbonNotchY - h * 0.015f)
+        lineTo(ribbonLeft + innerMargin, ribbonBottom - h * 0.02f)
+        close()
+    }
+    drawPath(path = innerRibbonPath, color = emeraldMid)
+
+    // 2. Top 8-Pointed Gold & Emerald Islamic Rosette Medallion
+    val rosetteCenterY = top + h * 0.21f
+    val rOuter = minOf(w * 0.46f, h * 0.20f)
+
+    fun drawOctagramStar(radius: Float, color: Color) {
+        val halfSide = radius * 0.7071f
+        // Axis-aligned square
+        val sq1 = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx - halfSide, rosetteCenterY - halfSide)
+            lineTo(cx + halfSide, rosetteCenterY - halfSide)
+            lineTo(cx + halfSide, rosetteCenterY + halfSide)
+            lineTo(cx - halfSide, rosetteCenterY + halfSide)
+            close()
+        }
+        drawPath(path = sq1, color = color)
+
+        // 45-degree rotated diamond square
+        val sq2 = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx, rosetteCenterY - radius)
+            lineTo(cx + radius, rosetteCenterY)
+            lineTo(cx, rosetteCenterY + radius)
+            lineTo(cx - radius, rosetteCenterY)
+            close()
+        }
+        drawPath(path = sq2, color = color)
+    }
+
+    drawOctagramStar(rOuter, goldOuter)
+    drawOctagramStar(rOuter * 0.82f, emeraldDark)
+    drawOctagramStar(rOuter * 0.64f, goldBright)
+    drawOctagramStar(rOuter * 0.46f, emeraldCore)
+    drawOctagramStar(rOuter * 0.28f, goldOuter)
+    drawOctagramStar(rOuter * 0.16f, emeraldMid)
+}
+
 @Composable
 private fun WaqfGreenRibbonBadge(modifier: Modifier = Modifier) {
     androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cx = w * 0.5f
-
-        val goldOuter = Color(0xFFD9B863)
-        val goldBright = Color(0xFFE5C878)
-        val emeraldDark = Color(0xFF065535)
-        val emeraldMid = Color(0xFF0B6E45)
-        val emeraldCore = Color(0xFF043D26)
-
-        // 1. Vertical Green Ribbon Body with Swallowtail V-Notch at bottom
-        val ribbonLeft = w * 0.24f
-        val ribbonRight = w * 0.76f
-        val ribbonTop = h * 0.24f
-        val ribbonBottom = h * 0.96f
-        val ribbonNotchY = h * 0.88f
-
-        val outerRibbonPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(ribbonLeft, ribbonTop)
-            lineTo(ribbonRight, ribbonTop)
-            lineTo(ribbonRight, ribbonBottom)
-            lineTo(cx, ribbonNotchY)
-            lineTo(ribbonLeft, ribbonBottom)
-            close()
-        }
-        drawPath(path = outerRibbonPath, color = emeraldDark)
-
-        val innerMargin = w * 0.055f
-        val innerRibbonPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(ribbonLeft + innerMargin, ribbonTop)
-            lineTo(ribbonRight - innerMargin, ribbonTop)
-            lineTo(ribbonRight - innerMargin, ribbonBottom - h * 0.02f)
-            lineTo(cx, ribbonNotchY - h * 0.015f)
-            lineTo(ribbonLeft + innerMargin, ribbonBottom - h * 0.02f)
-            close()
-        }
-        drawPath(path = innerRibbonPath, color = emeraldMid)
-
-        // 2. Top 8-Pointed Gold & Emerald Islamic Rosette Medallion
-        val rosetteCenterY = h * 0.21f
-        val rOuter = minOf(w * 0.46f, h * 0.20f)
-
-        fun drawOctagramStar(radius: Float, color: Color) {
-            val halfSide = radius * 0.7071f
-            // Axis-aligned square
-            val sq1 = androidx.compose.ui.graphics.Path().apply {
-                moveTo(cx - halfSide, rosetteCenterY - halfSide)
-                lineTo(cx + halfSide, rosetteCenterY - halfSide)
-                lineTo(cx + halfSide, rosetteCenterY + halfSide)
-                lineTo(cx - halfSide, rosetteCenterY + halfSide)
-                close()
-            }
-            drawPath(path = sq1, color = color)
-
-            // 45-degree rotated diamond square
-            val sq2 = androidx.compose.ui.graphics.Path().apply {
-                moveTo(cx, rosetteCenterY - radius)
-                lineTo(cx + radius, rosetteCenterY)
-                lineTo(cx, rosetteCenterY + radius)
-                lineTo(cx - radius, rosetteCenterY)
-                close()
-            }
-            drawPath(path = sq2, color = color)
-        }
-
-        drawOctagramStar(rOuter, goldOuter)
-        drawOctagramStar(rOuter * 0.82f, emeraldDark)
-        drawOctagramStar(rOuter * 0.64f, goldBright)
-        drawOctagramStar(rOuter * 0.46f, emeraldCore)
-        drawOctagramStar(rOuter * 0.28f, goldOuter)
-        drawOctagramStar(rOuter * 0.16f, emeraldMid)
+        drawWaqfGreenRibbonOnCanvas(
+            left = 0f,
+            top = 0f,
+            width = size.width,
+            height = size.height
+        )
     }
 }
+
 

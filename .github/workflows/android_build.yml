@@ -1,18 +1,18 @@
-name: Android Build & Auto-Release APK
+name: Android Release APK (GitHub Releases Only)
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "**" ]
+    tags-ignore:
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build & Publish Mihrabi APK
+  release-apk:
+    name: Build & Publish Mihrabi Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -32,25 +32,45 @@ jobs:
             chmod +x gradlew
           fi
 
-      - name: Prepare Build Environment and Keystore
+      - name: Prepare Release Keystore (Preserving App Upgrade Signature)
         run: |
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           elif [ ! -f debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+          rm -f my-upload-key.jks
+          keytool -importkeystore \
+            -srckeystore debug.keystore \
+            -srcstorepass android \
+            -srcalias androiddebugkey \
+            -srckeypass android \
+            -destkeystore my-upload-key.jks \
+            -deststorepass android \
+            -destalias upload \
+            -destkeypass android \
+            -noprompt
           touch .env
 
-      - name: Build Debug APK
+      - name: Build Signed Release APK
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: android
+          KEY_PASSWORD: android
         run: |
           if [ -f gradlew ]; then
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleRelease --no-daemon --stacktrace
           else
-            gradle assembleDebug --no-daemon --stacktrace
+            gradle assembleRelease --no-daemon --stacktrace
           fi
-          cp app/build/outputs/apk/debug/app-debug.apk Mihrabi-latest.apk
+          RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$RELEASE_APK" ]; then
+            echo "Release APK not found!"
+            exit 1
+          fi
+          cp "$RELEASE_APK" "Mihrabi-latest.apk"
+          cp "$RELEASE_APK" "Mihrabi-release-v1.0.${{ github.run_number }}.apk"
 
       - name: Generate Release Metadata JSON
         run: |
@@ -58,32 +78,30 @@ jobs:
           {
             "versionCode": $((100 + ${{ github.run_number }})),
             "versionName": "1.0.${{ github.run_number }}",
+            "buildType": "release",
             "commitSha": "${{ github.sha }}",
             "repository": "${{ github.repository }}",
-            "apkFileName": "Mihrabi-latest.apk"
+            "apkFileName": "Mihrabi-latest.apk",
+            "versionedApkFileName": "Mihrabi-release-v1.0.${{ github.run_number }}.apk"
           }
           EOF
 
-      - name: Upload Debug APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mihrabi-APK
-          path: |
-            Mihrabi-latest.apk
-            version.json
-
-      - name: Publish Automatic GitHub Release for In-App Updater
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      - name: Publish Signed Release APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: "تحديث تطبيق محرابي v1.0.${{ github.run_number }}"
-          body: "بناء تلقائي لملف APK من مستودع GitHub جاهز للتحديث الداخلي المباشر داخل تطبيق محرابي."
+          name: "إصدار تطبيق محرابي (Release) v1.0.${{ github.run_number }}"
+          body: |
+            ### 🕌 إصدار رسمي لتطبيق محرابي (Release APK) - الإصدار `v1.0.${{ github.run_number }}`
+            - **نوع النسخة:** نسخة Release موقعة وجاهزة للتثبيت والتحديث المباشر (`assembleRelease`).
+            - **التحميل المباشر:** قم بتحميل ملف `Mihrabi-latest.apk` أو `Mihrabi-release-v1.0.${{ github.run_number }}.apk` من قسم **Assets** أدناه.
           draft: false
           prerelease: false
           make_latest: "true"
           files: |
             Mihrabi-latest.apk
+            Mihrabi-release-v1.0.${{ github.run_number }}.apk
             version.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
