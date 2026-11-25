@@ -26,6 +26,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -57,12 +58,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +81,7 @@ import com.example.audio.QuranReciter
 import com.example.data.OfflineQuranDatabase
 import com.example.data.OfflineVerse
 import com.example.data.QuranDataHelper
+import com.example.data.QuranSearchResult
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
@@ -126,17 +130,6 @@ fun QuranReaderScreen(
     val haptic = LocalHapticFeedback.current
     val audioPlaybackState by QuranAudioPlayerManager.playbackState.collectAsState()
     val activeWordPronunciation by QuranAudioPlayerManager.activeWordState.collectAsState()
-
-    val wordPulseTransition = rememberInfiniteTransition(label = "word_emerald_pulse")
-    val wordPulseAlpha by wordPulseTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.56f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 520, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "word_emerald_pulse_alpha"
-    )
 
     LaunchedEffect(backupVersion) {
         QuranAudioPlayerManager.initPreferences(context)
@@ -342,10 +335,10 @@ fun QuranReaderScreen(
         }
     }
 
-    val pageBgColor = if (isNightMushafMode) Color(0xFF0B1520) else Color(0xFFFDF8EE)
-    val pageCardColor = if (isNightMushafMode) Color(0xFF101F2E) else Color(0xFFFFFBF2)
-    val textColor = if (isNightMushafMode) Color(0xFFF5EFE0) else Color(0xFF1B1612)
-    val secondaryTextColor = if (isNightMushafMode) Color(0xFFB8C7D9) else Color(0xFF5C4E3C)
+    val pageBgColor = if (isNightMushafMode) Color(0xFF0B1520) else Color(0xFFF6F7F9)
+    val pageCardColor = if (isNightMushafMode) Color(0xFF101F2E) else Color(0xFFFFFFFF)
+    val textColor = if (isNightMushafMode) Color(0xFFF5EFE0) else Color(0xFF111111)
+    val secondaryTextColor = if (isNightMushafMode) Color(0xFFB8C7D9) else Color(0xFF4B5563)
 
     Box(
         modifier = Modifier
@@ -523,9 +516,14 @@ fun QuranReaderScreen(
                                 OutlinedButton(
                                     onClick = { showSearchDialog = true },
                                     shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, GoldBorder),
+                                    border = BorderStroke(1.dp, GoldAccent),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = GoldAccent.copy(alpha = 0.12f)
+                                    ),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(34.dp)
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("open_quran_search_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
@@ -876,9 +874,9 @@ fun QuranReaderScreen(
                     } else null
 
                     val activeWordHighlightColor = if (isNightMushafMode) {
-                        Color(0xFF10B981).copy(alpha = wordPulseAlpha)
+                        Color(0xFF10B981).copy(alpha = 0.42f)
                     } else {
-                        Color(0xFF34D399).copy(alpha = wordPulseAlpha)
+                        Color(0xFF34D399).copy(alpha = 0.45f)
                     }
 
                     MushafPageContent(
@@ -893,6 +891,7 @@ fun QuranReaderScreen(
                         isNightMode = isNightMushafMode,
                         isFullScreen = isFullScreen,
                         onExitFullScreen = { onToggleFullScreen(false) },
+                        onOpenSearch = { showSearchDialog = true },
                         onPreviousPage = {
                             if (pageNum > 1) {
                                 coroutineScope.launch {
@@ -1832,93 +1831,420 @@ fun QuranReaderScreen(
         )
     }
 
-    // Offline Full-Quran Verse Search Dialog
+    // Offline Full-Quran Instant Word & Ayah Search Dialog
     if (showSearchDialog) {
         var searchQuery by remember { mutableStateOf("") }
-        val searchResults = remember(searchQuery) {
-            if (searchQuery.trim().length >= 2) {
-                OfflineQuranDatabase.searchVerses(context, searchQuery, limit = 40)
+        var exactWholeWordOnly by remember { mutableStateOf(false) }
+
+        val searchResult: QuranSearchResult = remember(searchQuery, exactWholeWordOnly, isDatabaseReady) {
+            if (isDatabaseReady && searchQuery.trim().length >= 2) {
+                OfflineQuranDatabase.searchVersesInstant(
+                    context = context,
+                    query = searchQuery,
+                    exactWholeWordOnly = exactWholeWordOnly,
+                    limit = 800
+                )
             } else {
-                emptyList()
+                QuranSearchResult(
+                    query = searchQuery.trim(),
+                    totalMatchingVerses = 0,
+                    totalWordOccurrences = 0,
+                    matches = emptyList()
+                )
             }
         }
 
-        AlertDialog(
+        val quickExamples = remember {
+            listOf("الصلاة", "الرحمن", "الجنة", "يمشي", "الصراط المستقيم", "الحمد لله", "شهر رمضان")
+        }
+
+        Dialog(
             onDismissRequest = { showSearchDialog = false },
-            title = {
-                Text(
-                    text = "البحث الفوري في آيات المصحف الشريف",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = GoldAccent,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.88f)
+                    .border(1.4.dp, GoldAccent, RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "البحث الفوري في المصحف الشريف",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = GoldAccent,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = "ابحث عن أي كلمة أو آية ليظهر كل موضع لها فوراً",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { showSearchDialog = false },
+                            modifier = Modifier.testTag("close_quran_search_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق البحث",
+                                tint = GoldAccent
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Instant Search Input Field
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         label = { Text("اكتب كلمة أو جزءاً من آية...") },
-                        placeholder = { Text("مثال: الصراط المستقيم، الله نور، شهر رمضان") },
+                        placeholder = { Text("مثال: الصلاة، يمشي، الرحمن، الصراط المستقيم") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = EmeraldGreen
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "مسح البحث",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
+                        },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("quran_search_input")
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
 
-                    if (searchQuery.trim().length >= 2 && searchResults.isEmpty()) {
-                        Text(
-                            text = "لم يتم العثور على آيات مطابقة.",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(12.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Search Match Mode Toggle Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = !exactWholeWordOnly,
+                            onClick = { exactWholeWordOnly = false },
+                            label = {
+                                Text(
+                                    text = "جميع المطابقات",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            modifier = Modifier.testTag("search_mode_all_chip")
                         )
+                        FilterChip(
+                            selected = exactWholeWordOnly,
+                            onClick = { exactWholeWordOnly = true },
+                            label = {
+                                Text(
+                                    text = "كلمة مطابقة تماماً",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            modifier = Modifier.testTag("search_mode_exact_chip")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (searchQuery.trim().length < 2) {
+                        // Quick Suggestions when empty
+                        Text(
+                            text = "أمثلة سريعة للبحث الفوري:",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(quickExamples) { sample ->
+                                AssistChip(
+                                    onClick = { searchQuery = sample },
+                                    label = {
+                                        Text(
+                                            text = sample,
+                                            fontFamily = AmiriFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = EmeraldGreen.copy(alpha = 0.08f),
+                            border = BorderStroke(0.8.dp, EmeraldGreen.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "بحث ذكي يدعم الرسم العثماني والإملائي",
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen,
+                                    fontSize = 13.5.sp
+                                )
+                                Text(
+                                    text = "• اكتب الكلمة بإملاء لوحة المفاتيح العادي (مثل: الصلاة، الكتاب، السماوات، يمشي، في) وستظهر لك فوراً كل الآيات التي وردت فيها مع تظليل الكلمة داخل كل آية.\n• اضغط على أي نتيجة للانتقال المباشر إلى صفحتها وتحديد الآية في المصحف.",
+                                    fontSize = 12.sp,
+                                    lineHeight = 19.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    } else if (searchResult.totalMatchingVerses == 0) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = GoldAccent.copy(alpha = 0.55f),
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Text(
+                                    text = "لم يتم العثور على آيات مطابقة لعبارة «${searchQuery.trim()}»",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center
+                                )
+                                if (exactWholeWordOnly) {
+                                    TextButton(onClick = { exactWholeWordOnly = false }) {
+                                        Text(
+                                            text = "جرب البحث في «جميع المطابقات»",
+                                            color = EmeraldGreen,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     } else {
+                        // Live Match Statistics Summary Banner
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = EmeraldGreen.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "الآيات المطابقة: ${toArabicIndicDigits(searchResult.totalMatchingVerses)} آية",
+                                    color = EmeraldGreen,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "إجمالي التكرار: ${toArabicIndicDigits(searchResult.totalWordOccurrences)} مرة",
+                                    color = GoldAccent,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+
+                        if (searchResult.totalMatchingVerses > searchResult.matches.size) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "يتم عرض أول ${toArabicIndicDigits(searchResult.matches.size)} آية مطابقة (يمكنك كتابة كلمة إضافية لتضييق النتائج)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(320.dp),
+                                .weight(1f)
+                                .testTag("quran_search_results_list"),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(searchResults) { v ->
+                            items(
+                                items = searchResult.matches,
+                                key = { "${it.verse.surahNumber}:${it.verse.ayahNumber}" }
+                            ) { matchItem ->
+                                val v = matchItem.verse
+                                val highlightedAyahText = remember(v.textAr, searchQuery, exactWholeWordOnly) {
+                                    val matchedIndices = OfflineQuranDatabase.findMatchingWordIndicesInVerse(
+                                        rawVerseText = v.textAr,
+                                        query = searchQuery,
+                                        exactWholeWordOnly = exactWholeWordOnly
+                                    )
+                                    val tokens = v.textAr.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+                                    buildAnnotatedString {
+                                        tokens.forEachIndexed { idx, token ->
+                                            if (idx > 0) append(" ")
+                                            if (matchedIndices.contains(idx)) {
+                                                withStyle(
+                                                    SpanStyle(
+                                                        color = Color(0xFF065F46),
+                                                        background = Color(0xFFFDE68A)
+                                                    )
+                                                ) {
+                                                    append(token)
+                                                }
+                                            } else {
+                                                append(token)
+                                            }
+                                        }
+                                        withStyle(
+                                            SpanStyle(
+                                                color = Color(0xFF9A6F0B)
+                                            )
+                                        ) {
+                                            append("\u202F﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                        }
+                                    }
+                                }
+
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable {
+                                            val targetKey = "${v.surahNumber}:${v.ayahNumber}"
+                                            focusedReadingVerseKey = targetKey
+                                            quranPrefs.edit()
+                                                .putString("focused_verse_key_$activeTrackId", targetKey)
+                                                .apply()
                                             showSearchDialog = false
                                             coroutineScope.launch {
                                                 pagerState.scrollToPage((v.page - 1).coerceIn(0, 603))
                                                 floatingPopoverVerse = v
                                             }
                                         }
-                                        .border(0.5.dp, GoldBorder, RoundedCornerShape(10.dp)),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        .border(0.9.dp, GoldBorder, RoundedCornerShape(12.dp)),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isNightMushafMode) Color(0xFF132436) else Color(0xFFFFFFFF)
+                                    )
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "سورة ${v.surahNameAr} • آية ${v.ayahNumber}",
-                                                color = GoldAccent,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp
+                                                text = "سورة ${v.surahNameAr} • الآية ${toArabicIndicDigits(v.ayahNumber)}",
+                                                color = if (isNightMushafMode) GoldAccent else Color(0xFF0F5257),
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 13.sp
                                             )
-                                            Text(
-                                                text = "صفحة ${v.page}",
-                                                color = EmeraldGreen,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp
-                                            )
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                if (matchItem.occurrenceCount > 1) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(50),
+                                                        color = GoldAccent.copy(alpha = 0.2f)
+                                                    ) {
+                                                        Text(
+                                                            text = "${toArabicIndicDigits(matchItem.occurrenceCount)}×",
+                                                            color = GoldAccent,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            fontSize = 11.sp,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(50),
+                                                    color = EmeraldGreen.copy(alpha = 0.14f)
+                                                ) {
+                                                    Text(
+                                                        text = "صفحة ${toArabicIndicDigits(v.page)}",
+                                                        color = EmeraldGreen,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 11.5.sp,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
                                         }
-                                        Spacer(modifier = Modifier.height(4.dp))
+
                                         Text(
-                                            text = v.textAr,
+                                            text = "الجزء ${toArabicIndicDigits(v.juz)} • الحزب ${toArabicIndicDigits(v.hizb)} (${rubFractionShortLabel(v.rubInHizb)})",
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        Text(
+                                            text = highlightedAyahText,
                                             fontFamily = AmiriFontFamily,
-                                            fontSize = 16.sp,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.5.sp,
+                                            lineHeight = 31.sp,
+                                            color = if (isNightMushafMode) Color(0xFFF5EFE0) else Color(0xFF111111),
+                                            textAlign = TextAlign.Right,
+                                            modifier = Modifier.fillMaxWidth()
                                         )
                                     }
                                 }
@@ -1926,13 +2252,8 @@ fun QuranReaderScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSearchDialog = false }) {
-                    Text("إغلاق", color = GoldAccent)
-                }
             }
-        )
+        }
     }
 }
 
@@ -2207,6 +2528,66 @@ private fun countSpokenWordsInAyah(rawText: String): Int {
     return count.coerceAtLeast(1)
 }
 
+private const val QURAN_OPENTYPE_FONT_FEATURES = "\"liga\" 1, \"calt\" 1, \"mark\" 1, \"mkmk\" 1, \"kern\" 1"
+
+/**
+ * Builds the exact invariant plain-text character sequence for a verse as rendered by
+ * [appendShamarlyColoredQuranText] + the atomic verse-end marker `\u202F﴿...﴾ `.
+ * Because this character sequence NEVER depends on bookmark, focus, memorization, or audio state,
+ * `textMeasurer` and `Text` always measure and render the exact same characters and line breaks.
+ */
+private fun buildCanonicalGroupPlainText(groupVerses: List<OfflineVerse>): String {
+    return buildString {
+        groupVerses.forEach { v ->
+            val rawText = v.textAr
+            var index = 0
+            val len = rawText.length
+            while (index < len) {
+                val start = index
+                val isSpace = rawText[index].isWhitespace()
+                while (index < len && rawText[index].isWhitespace() == isSpace) {
+                    index++
+                }
+                val token = rawText.substring(start, index)
+                if (isSpace) {
+                    append(token)
+                } else {
+                    var leadIdx = 0
+                    while (leadIdx < token.length && token[leadIdx] == '\u06DE') {
+                        leadIdx++
+                    }
+                    if (leadIdx > 0) {
+                        append("\u0640\u06DE\u0640\u202F")
+                    }
+                    val remainingToken = token.substring(leadIdx)
+                    if (remainingToken.isNotEmpty()) {
+                        var splitIdx = remainingToken.length
+                        while (splitIdx > 0 && isUthmaniWaqfChar(remainingToken[splitIdx - 1])) {
+                            splitIdx--
+                        }
+                        val coreWord = remainingToken.substring(0, splitIdx)
+                        val trailingWaqf = remainingToken.substring(splitIdx)
+                        if (coreWord.isNotEmpty()) {
+                            append(coreWord)
+                        }
+                        if (trailingWaqf.isNotEmpty()) {
+                            val hasSajdah = trailingWaqf.contains('\u06E9')
+                            val nonSajdahWaqf = trailingWaqf.filter { it != '\u06E9' }
+                            if (nonSajdahWaqf.isNotEmpty()) {
+                                append(nonSajdahWaqf)
+                            }
+                            if (hasSajdah) {
+                                append("\u202F۩")
+                            }
+                        }
+                    }
+                }
+            }
+            append("\u202F﴿${toArabicIndicDigits(v.ayahNumber)}﴾ ")
+        }
+    }
+}
+
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColoredQuranText(
     rawText: String,
     baseTextColor: Color,
@@ -2221,12 +2602,11 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
     val totalWordsInAyah = if (verseTagKey.isNotEmpty()) countSpokenWordsInAyah(rawText) else 1
     var spokenWordCounter = 0
 
-    // IMPORTANT: Avoid setting fontFamily, fontSize, or fontWeight on inner SpanStyles here!
-    // In Android's StaticLayout / TextLine, any MetricAffectingSpan (TypefaceSpan, AbsoluteSizeSpan, StyleSpan)
-    // splits the HarfBuzz shaping run at the span boundary, which breaks OpenType GPOS mark-to-base anchoring
-    // between a Quranic word and its trailing Uthmani Waqf mark (\u06D6..\u06DC: ۖ ۗ ۘ ۙ ۚ) and causes
-    // combining Waqf marks at the end of a line to detach or jump to the right margin.
-    // By only setting color & background (non-metric spans), HarfBuzz shapes the word + its Waqf mark in one run.
+    // IMPORTANT: Never set fontFamily, fontSize, fontWeight, or letterSpacing on inner SpanStyles!
+    // In Android's StaticLayout / TextLine, any MetricAffectingSpan splits the HarfBuzz shaping run,
+    // which breaks OpenType GSUB/GPOS mark-to-base anchoring between a Quranic word and its trailing
+    // Uthmani Waqf mark (\u06D6..\u06DC: ۖ ۗ ۘ ۙ ۚ ۛ ۜ). By only setting non-metric color & background,
+    // HarfBuzz shapes every word and its diacritics/Waqf marks in one locked, rock-solid run.
     var index = 0
     val len = rawText.length
     while (index < len) {
@@ -2246,19 +2626,31 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                 append(token)
             }
         } else {
-            // 1. Separate any leading Rub' Al-Hizb symbol '۞' (\u06DE) attached to the start of the first word of a Rub'
+            // 1. Separate any leading Rub' Al-Hizb symbol '۞' (\u06DE) attached to the start of the first word of a Rub'.
+            // Use a pure Arabic RTL non-breaking token ("\u0640\u06DE\u0640") followed by Narrow No-Break Space ("\u202F")
+            // so BiDi never treats it as an LTR number run and TextAlign.Justify never stretches the gap after the star.
             var leadIdx = 0
             while (leadIdx < token.length && token[leadIdx] == '\u06DE') {
                 leadIdx++
             }
             if (leadIdx > 0) {
+                pushStringAnnotation(tag = "RUB_STAR_ANCHOR", annotation = verseTagKey.ifEmpty { "rub" })
                 withStyle(
                     SpanStyle(
-                        color = waqfColor,
+                        color = Color.Transparent,
                         background = bgHighlight
                     )
                 ) {
-                    append("۞ ")
+                    append("\u0640\u06DE\u0640")
+                }
+                pop()
+                withStyle(
+                    SpanStyle(
+                        color = baseTextColor,
+                        background = bgHighlight
+                    )
+                ) {
+                    append("\u202F")
                 }
             }
 
@@ -2276,21 +2668,21 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                 val isDivineName = normalized in DIVINE_NAME_NORMALIZED_FORMS
                 val isPureWaqfToken = coreWord.isEmpty() || coreWord.all { isUthmaniWaqfChar(it) }
 
-                if (coreWord.isNotEmpty()) {
-                    val isSpokenWord = !isPureWaqfToken && verseTagKey.isNotEmpty()
-                    if (isSpokenWord) {
-                        spokenWordCounter++
-                    }
-                    val currentWordKey = if (isSpokenWord) "$verseTagKey:$spokenWordCounter" else ""
-                    val isWordPronouncing = currentWordKey.isNotEmpty() && currentWordKey == activeWordKey
+                val isSpokenWord = coreWord.isNotEmpty() && !isPureWaqfToken && verseTagKey.isNotEmpty()
+                if (isSpokenWord) {
+                    spokenWordCounter++
+                }
+                val currentWordKey = if (isSpokenWord) "$verseTagKey:$spokenWordCounter" else ""
+                val isWordPronouncing = currentWordKey.isNotEmpty() && currentWordKey == activeWordKey
+                val effectiveWordBg = if (isWordPronouncing) activeWordHighlightColor else bgHighlight
 
+                if (coreWord.isNotEmpty()) {
                     val wordColor = when {
                         isWordPronouncing -> Color(0xFF064E3B)
                         isDivineName -> divineNameColor
                         isPureWaqfToken -> waqfColor
                         else -> baseTextColor
                     }
-                    val effectiveWordBg = if (isWordPronouncing) activeWordHighlightColor else bgHighlight
 
                     if (isSpokenWord) {
                         pushStringAnnotation(
@@ -2314,10 +2706,13 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                     val hasSajdah = trailingWaqf.contains('\u06E9')
                     val nonSajdahWaqf = trailingWaqf.filter { it != '\u06E9' }
                     if (nonSajdahWaqf.isNotEmpty()) {
+                        // Keep the trailing combining Waqf mark directly attached to coreWord with the
+                        // exact same background span so HarfBuzz GSUB/GPOS anchors it above the end of the word
+                        // and ICU LineBreaker never breaks between the word and its Waqf mark.
                         withStyle(
                             SpanStyle(
-                                color = waqfColor,
-                                background = bgHighlight
+                                color = if (isWordPronouncing) Color(0xFF064E3B) else waqfColor,
+                                background = effectiveWordBg
                             )
                         ) {
                             append(nonSajdahWaqf)
@@ -2330,7 +2725,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
                                 background = bgHighlight
                             )
                         ) {
-                            append("\u00A0۩")
+                            append("\u202F۩")
                         }
                     }
                 }
@@ -2352,6 +2747,7 @@ private fun MushafPageContent(
     isNightMode: Boolean,
     isFullScreen: Boolean = false,
     onExitFullScreen: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     onPreviousPage: () -> Unit = {},
     onNextPage: () -> Unit = {},
     bookmarkedSurah: String,
@@ -2370,6 +2766,10 @@ private fun MushafPageContent(
     val surahName = firstVerse?.surahNameAr ?: ""
     val juzNumber = lastVerse?.juz ?: firstVerse?.juz ?: (((pageNumber - 1) / 20) + 1).coerceIn(1, 30)
     val hizbNumber = lastVerse?.hizb ?: firstVerse?.hizb ?: 1
+    val currentRubInHizb = lastVerse?.rubInHizb ?: firstVerse?.rubInHizb ?: 1
+    val rubStartVersesOnPage = remember(verses) {
+        verses.filter { it.startsNewRub && !(it.surahNumber == 1 && it.ayahNumber == 1) }
+    }
     val hasSajdahOnPage = remember(verses) {
         verses.any { it.isSajda || SAJDAH_VERSE_KEYS.contains("${it.surahNumber}:${it.ayahNumber}") }
     }
@@ -2377,6 +2777,7 @@ private fun MushafPageContent(
 
     val divineNameColor = if (isNightMode) Color(0xFFFF5A6E) else Color(0xFFC41E3A)
     val waqfMarkColor = if (isNightMode) Color(0xFF4FD1C5) else Color(0xFF0F6B58)
+    val currentRubAccentColor = rubFractionAccentColor(currentRubInHizb, isNightMode)
 
     Box(
         modifier = Modifier
@@ -2400,18 +2801,18 @@ private fun MushafPageContent(
                 .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Ornamental Shamarly/Madinah Mushaf Top Header Bar
-            // Right: Surah Name | Center: Juz & Hizb | Left: Sajdah Badge (۩) + Page Badge + FullScreen Exit
+            // 1. Ornamental Bright Mushaf Top Header Bar
+            // Right: Surah Name | Center: Juz, Hizb & Current Rub' Badge | Left: Sajdah + Search (Fullscreen) + Page/Exit
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(0.8.dp, GoldBorder, RoundedCornerShape(8.dp))
+                    .border(0.9.dp, GoldBorder, RoundedCornerShape(9.dp))
                     .background(
-                        if (isNightMode) Color(0xFF162A3F).copy(alpha = 0.78f)
-                        else Color(0xFFF3E9D2).copy(alpha = 0.85f),
-                        RoundedCornerShape(8.dp)
+                        if (isNightMode) Color(0xFF162A3F).copy(alpha = 0.82f)
+                        else Color(0xFFFAFBFD),
+                        RoundedCornerShape(9.dp)
                     )
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2425,17 +2826,37 @@ private fun MushafPageContent(
                     maxLines = 1
                 )
 
-                // Center: Canonical Juz & Hizb Indicator
-                Text(
-                    text = "الجزء ${toArabicIndicDigits(juzNumber)} • الحزب ${toArabicIndicDigits(hizbNumber)}",
-                    fontFamily = AmiriFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = if (isNightMode) Color(0xFFE6F1FF) else Color(0xFF4A3720),
-                    maxLines = 1
-                )
+                // Center: Canonical Juz, Hizb & Clear Rub' Indicator Pill
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Text(
+                        text = "الجزء ${toArabicIndicDigits(juzNumber)} • الحزب ${toArabicIndicDigits(hizbNumber)}",
+                        fontFamily = AmiriFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.5.sp,
+                        color = if (isNightMode) Color(0xFFE6F1FF) else Color(0xFF1F2937),
+                        maxLines = 1
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = currentRubAccentColor.copy(alpha = if (isNightMode) 0.22f else 0.13f),
+                        border = BorderStroke(0.8.dp, currentRubAccentColor.copy(alpha = 0.7f))
+                    ) {
+                        Text(
+                            text = rubFractionShortLabel(currentRubInHizb),
+                            fontFamily = AmiriFontFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.5.sp,
+                            color = currentRubAccentColor,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
 
-                // Left in RTL: Sajdah Badge (if on page) + FullScreen Exit
+                // Left in RTL: Sajdah Badge (if on page) + Quick Search (FullScreen) + FullScreen Exit / Page Pill
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -2450,14 +2871,33 @@ private fun MushafPageContent(
                                 text = "۩ سجدة",
                                 fontFamily = AmiriFontFamily,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 color = divineNameColor,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             )
                         }
                     }
 
                     if (isFullScreen) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isNightMode) RoyalNavyDark else Color(0xFFFFFFFF),
+                            border = BorderStroke(0.8.dp, GoldAccent),
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .clickable { onOpenSearch() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "بحث في المصحف",
+                                    tint = GoldAccent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(50),
                             color = RoyalNavyDark,
@@ -2467,7 +2907,7 @@ private fun MushafPageContent(
                                 .clickable { onExitFullScreen() }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
@@ -2488,20 +2928,29 @@ private fun MushafPageContent(
                     } else {
                         Surface(
                             shape = RoundedCornerShape(50),
-                            color = if (isNightMode) RoyalNavyDark else Color(0xFFE7D6B5),
-                            border = BorderStroke(0.8.dp, GoldAccent)
+                            color = if (isNightMode) RoyalNavyDark else Color(0xFFFFFFFF),
+                            border = BorderStroke(0.9.dp, GoldAccent)
                         ) {
                             Text(
                                 text = "ص $arabicPageNumber",
                                 fontFamily = AmiriFontFamily,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 11.5.sp,
-                                color = if (isNightMode) GoldAccent else Color(0xFF1A110B),
+                                color = if (isNightMode) GoldAccent else Color(0xFF111111),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp)
                             )
                         }
                     }
                 }
+            }
+
+            // 1B. Enlarged Ornamental Rub' Al-Hizb / Half-Hizb Milestone Banner (whenever a Hizb / Rub' / Half-Hizb begins on this page)
+            if (rubStartVersesOnPage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                RubAlHizbMilestoneBanner(
+                    rubStartVerses = rubStartVersesOnPage,
+                    isNightMode = isNightMode
+                )
             }
 
             Spacer(modifier = Modifier.height(3.dp))
@@ -2542,15 +2991,15 @@ private fun MushafPageContent(
                     val availHeightPx = constraints.maxHeight.coerceAtLeast(100)
 
                     // Automatically compute the largest BOLD font size that fits 100% of this page's verses
-                    // on a single screen without ANY vertical scrolling!
+                    // on a single screen without ANY vertical scrolling.
+                    // CRITICAL: This calculation depends ONLY on (pageNumber, verses, availWidthPx, availHeightPx)
+                    // and NEVER on bookmarkedSurah, bookmarkedAyah, focusedReadingVerseKey, or memorizedAyahKeys,
+                    // so the page font size and line wraps remain 100% locked while reading or tapping verses!
                     val autoFittedFontSp = remember(
                         pageNumber,
                         verses,
                         availWidthPx,
-                        availHeightPx,
-                        bookmarkedSurah,
-                        bookmarkedAyah,
-                        memorizedAyahKeys
+                        availHeightPx
                     ) {
                         var bannerOverheadPx = 0f
                         val groupStrings = surahGroups.map { (firstV, groupVerses) ->
@@ -2560,22 +3009,7 @@ private fun MushafPageContent(
                                     bannerOverheadPx += with(density) { 28.dp.toPx() }
                                 }
                             }
-                            buildString {
-                                groupVerses.forEach { v ->
-                                    if (v.textAr.startsWith('\u06DE')) {
-                                        append("۞ ")
-                                        append(v.textAr.removePrefix("\u06DE"))
-                                    } else {
-                                        append(v.textAr)
-                                    }
-                                    val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
-                                    if (isBookmarked) {
-                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾\u00A0٠٠ ")
-                                    } else {
-                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾ ")
-                                    }
-                                }
-                            }
+                            buildCanonicalGroupPlainText(groupVerses)
                         }
 
                         // Generous safety margin so the last line never clips inside the single-page frame
@@ -2593,7 +3027,13 @@ private fun MushafPageContent(
                                         fontFamily = AmiriFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = candidate.sp,
-                                        lineHeight = (candidate * 1.32f).sp,
+                                        lineHeight = (candidate * 1.44f).sp,
+                                        fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = true),
+                                        lineHeightStyle = LineHeightStyle(
+                                            alignment = LineHeightStyle.Alignment.Center,
+                                            trim = LineHeightStyle.Trim.None
+                                        ),
                                         textAlign = TextAlign.Justify,
                                         textDirection = TextDirection.Rtl
                                     ),
@@ -2618,7 +3058,7 @@ private fun MushafPageContent(
                         else -> 0f
                     }
                     val displayFontSp = (autoFittedFontSp + zoomDeltaSp).coerceIn(13f, 40f)
-                    val effectiveLineHeightSp = displayFontSp * 1.32f
+                    val effectiveLineHeightSp = displayFontSp * 1.44f
                     val isZoomScrollEnabled = fontZoomStep in 1..3
                     val pageScrollState = rememberScrollState()
 
@@ -2656,10 +3096,15 @@ private fun MushafPageContent(
                                     }
                                     Text(
                                         text = basmalahAnnotated,
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = (displayFontSp - 0.5f).coerceAtLeast(14f).sp,
-                                        textAlign = TextAlign.Center,
+                                        style = TextStyle(
+                                            fontFamily = AmiriFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = (displayFontSp - 0.5f).coerceAtLeast(14f).sp,
+                                            fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
+                                            platformStyle = PlatformTextStyle(includeFontPadding = true),
+                                            textAlign = TextAlign.Center,
+                                            textDirection = TextDirection.Rtl
+                                        ),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 1.dp)
@@ -2667,82 +3112,104 @@ private fun MushafPageContent(
                                 }
                             }
 
-                            val annotatedPageText = buildAnnotatedString {
-                                groupVerses.forEach { v ->
-                                    val tagKey = "${v.surahNumber}:${v.ayahNumber}"
-                                    val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
-                                    val isMemorized = memorizedAyahKeys.contains(tagKey)
-                                    val isFocusedReading = (focusedReadingVerseKey == tagKey)
-                                    val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
+                            val annotatedPageText = remember(
+                                groupVerses,
+                                textColor,
+                                divineNameColor,
+                                waqfMarkColor,
+                                isNightMode,
+                                displayFontSp,
+                                bookmarkedSurah,
+                                bookmarkedAyah,
+                                memorizedAyahKeys,
+                                focusedReadingVerseKey,
+                                selectedVerse,
+                                activeWordKey,
+                                activeWordHighlightColor
+                            ) {
+                                buildAnnotatedString {
+                                    groupVerses.forEach { v ->
+                                        val tagKey = "${v.surahNumber}:${v.ayahNumber}"
+                                        val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
+                                        val isMemorized = memorizedAyahKeys.contains(tagKey)
+                                        val isFocusedReading = (focusedReadingVerseKey == tagKey)
+                                        val isSelected = (selectedVerse?.surahNumber == v.surahNumber && selectedVerse.ayahNumber == v.ayahNumber)
 
-                                    val bgHighlight = when {
-                                        isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFCFD6DF)
-                                        isSelected -> GoldAccent.copy(alpha = 0.35f)
-                                        isBookmarked -> EmeraldGreen.copy(alpha = 0.22f)
-                                        isMemorized -> GoldAccent.copy(alpha = 0.16f)
-                                        else -> Color.Transparent
-                                    }
-
-                                    pushStringAnnotation(tag = "AYAH_TAP", annotation = tagKey)
-
-                                    appendShamarlyColoredQuranText(
-                                        rawText = v.textAr,
-                                        baseTextColor = textColor,
-                                        divineNameColor = divineNameColor,
-                                        waqfColor = waqfMarkColor,
-                                        bgHighlight = bgHighlight,
-                                        fontSizeSp = displayFontSp,
-                                        verseTagKey = tagKey,
-                                        activeWordKey = activeWordKey,
-                                        activeWordHighlightColor = activeWordHighlightColor
-                                    )
-
-                                    withStyle(
-                                        style = SpanStyle(
-                                            color = when {
-                                                isBookmarked -> EmeraldGreen
-                                                isMemorized -> GoldAccent
-                                                isNightMode -> GoldAccent
-                                                else -> Color(0xFF9A6F0B)
-                                            },
-                                            background = bgHighlight
-                                        )
-                                    ) {
-                                        append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
-                                    }
-                                    if (isBookmarked) {
-                                        withStyle(
-                                            style = SpanStyle(
-                                                color = Color.Transparent,
-                                                background = bgHighlight
-                                            )
-                                        ) {
-                                            append("\u00A0")
+                                        val bgHighlight = when {
+                                            isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFCFD6DF)
+                                            isSelected -> GoldAccent.copy(alpha = 0.35f)
+                                            isBookmarked -> EmeraldGreen.copy(alpha = 0.22f)
+                                            isMemorized -> GoldAccent.copy(alpha = 0.16f)
+                                            else -> Color.Transparent
                                         }
-                                        pushStringAnnotation(tag = "WAQF_RIBBON_ANCHOR", annotation = tagKey)
+
+                                        pushStringAnnotation(tag = "AYAH_TAP", annotation = tagKey)
+
+                                        appendShamarlyColoredQuranText(
+                                            rawText = v.textAr,
+                                            baseTextColor = textColor,
+                                            divineNameColor = divineNameColor,
+                                            waqfColor = waqfMarkColor,
+                                            bgHighlight = bgHighlight,
+                                            fontSizeSp = displayFontSp,
+                                            verseTagKey = tagKey,
+                                            activeWordKey = activeWordKey,
+                                            activeWordHighlightColor = activeWordHighlightColor
+                                        )
+
+                                        val ayahMarkerColor = when {
+                                            isBookmarked -> EmeraldGreen
+                                            isMemorized -> GoldAccent
+                                            isNightMode -> GoldAccent
+                                            else -> Color(0xFF9A6F0B)
+                                        }
+
+                                        // Non-breaking, non-stretching glue (\u202F) binds the verse number
+                                        // to the final word of the verse without ever being stretched by TextAlign.Justify
                                         withStyle(
                                             style = SpanStyle(
-                                                color = Color.Transparent,
+                                                color = ayahMarkerColor,
                                                 background = bgHighlight
                                             )
                                         ) {
-                                            append("٠٠")
+                                            append("\u202F")
+                                        }
+
+                                        // Tag the bookmarked verse's ﴿number﴾ token directly without adding ANY dummy
+                                        // characters, preventing line reflow, BiDi reordering, or trailing gaps!
+                                        if (isBookmarked) {
+                                            pushStringAnnotation(tag = "BOOKMARKED_AYAH_MARKER", annotation = tagKey)
+                                        }
+                                        withStyle(
+                                            style = SpanStyle(
+                                                color = ayahMarkerColor,
+                                                background = bgHighlight
+                                            )
+                                        ) {
+                                            append("﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                        }
+                                        if (isBookmarked) {
+                                            pop()
+                                        }
+
+                                        withStyle(
+                                            style = SpanStyle(
+                                                color = textColor,
+                                                background = Color.Transparent
+                                            )
+                                        ) {
+                                            append(" ")
                                         }
                                         pop()
                                     }
-                                    withStyle(
-                                        style = SpanStyle(
-                                            color = textColor,
-                                            background = Color.Transparent
-                                        )
-                                    ) {
-                                        append(" ")
-                                    }
-                                    pop()
                                 }
                             }
 
                             var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+                            val currentAnnotatedText by rememberUpdatedState(annotatedPageText)
+                            val currentOnVerseClicked by rememberUpdatedState(onVerseClicked)
+                            val currentOnVerseDoubleTapped by rememberUpdatedState(onVerseDoubleTapped)
+                            val currentOnWordLongPressed by rememberUpdatedState(onWordLongPressed)
 
                             Text(
                                 text = annotatedPageText,
@@ -2752,6 +3219,12 @@ private fun MushafPageContent(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = displayFontSp.sp,
                                     lineHeight = effectiveLineHeightSp.sp,
+                                    fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
+                                    platformStyle = PlatformTextStyle(includeFontPadding = true),
+                                    lineHeightStyle = LineHeightStyle(
+                                        alignment = LineHeightStyle.Alignment.Center,
+                                        trim = LineHeightStyle.Trim.None
+                                    ),
                                     textAlign = TextAlign.Justify,
                                     textDirection = TextDirection.Rtl
                                 ),
@@ -2761,12 +3234,12 @@ private fun MushafPageContent(
                                     .drawWithContent {
                                         drawContent()
                                         val layout = textLayoutResult ?: return@drawWithContent
-                                        val ribbonAnns = annotatedPageText.getStringAnnotations(
-                                            tag = "WAQF_RIBBON_ANCHOR",
+                                        val rubStarAnns = annotatedPageText.getStringAnnotations(
+                                            tag = "RUB_STAR_ANCHOR",
                                             start = 0,
                                             end = annotatedPageText.length
                                         )
-                                        for (ann in ribbonAnns) {
+                                        for (ann in rubStarAnns) {
                                             if (ann.start < ann.end && ann.end <= annotatedPageText.length) {
                                                 val box0 = layout.getBoundingBox(ann.start)
                                                 val box1 = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
@@ -2775,26 +3248,59 @@ private fun MushafPageContent(
                                                 val lineIdx = layout.getLineForOffset(ann.start)
                                                 val lineTop = layout.getLineTop(lineIdx)
                                                 val lineBottom = layout.getLineBottom(lineIdx)
-                                                val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
-                                                val ribbonH = lineH * 0.86f
-                                                val ribbonW = (maxRight - minLeft).coerceAtLeast(lineH * 0.44f)
+                                                val lineH = (lineBottom - lineTop).coerceAtLeast(18f)
+                                                val starSize = maxOf(maxRight - minLeft, lineH * 0.84f)
                                                 val cx = (minLeft + maxRight) * 0.5f
                                                 val cy = (lineTop + lineBottom) * 0.5f
+                                                drawRubAlHizbStarOnCanvas(
+                                                    cx = cx,
+                                                    cy = cy,
+                                                    radius = starSize * 0.46f,
+                                                    isNightMode = isNightMode
+                                                )
+                                            }
+                                        }
+                                        val ribbonAnns = annotatedPageText.getStringAnnotations(
+                                            tag = "BOOKMARKED_AYAH_MARKER",
+                                            start = 0,
+                                            end = annotatedPageText.length
+                                        )
+                                        for (ann in ribbonAnns) {
+                                            if (ann.start < ann.end && ann.end <= annotatedPageText.length) {
+                                                // ann.start is '﴿' (right bracket in RTL) and ann.end - 1 is '﴾' (left bracket in RTL).
+                                                // Anchor the Waqf ribbon cleanly on the outer-left shoulder of '﴾' so it NEVER covers
+                                                // the verse digits inside ﴿...﴾, NEVER wraps to the next line, and leaves zero gap!
+                                                val boxOpen = layout.getBoundingBox(ann.start)
+                                                val boxClose = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
+                                                val markerLeft = minOf(boxOpen.left, boxClose.left)
+                                                val closeW = (boxClose.right - boxClose.left).coerceAtLeast(6f)
+                                                val lineIdx = layout.getLineForOffset(ann.start)
+                                                val lineTop = layout.getLineTop(lineIdx)
+                                                val lineBottom = layout.getLineBottom(lineIdx)
+                                                val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
+                                                val ribbonW = (lineH * 0.28f).coerceAtLeast(8f)
+                                                val ribbonH = (lineH * 0.58f).coerceAtLeast(14f)
+                                                val cx = (markerLeft + closeW * 0.14f).coerceIn(
+                                                    ribbonW * 0.5f,
+                                                    (size.width - ribbonW * 0.5f).coerceAtLeast(ribbonW * 0.5f)
+                                                )
+                                                val topY = lineTop + lineH * 0.04f
                                                 drawWaqfGreenRibbonOnCanvas(
                                                     left = cx - ribbonW * 0.5f,
-                                                    top = cy - ribbonH * 0.5f,
+                                                    top = topY,
                                                     width = ribbonW,
                                                     height = ribbonH
                                                 )
                                             }
                                         }
                                     }
-                                    .pointerInput(annotatedPageText, groupVerses) {
+                                    .pointerInput(groupVerses) {
                                         detectTapGestures(
                                             onTap = { tapOffset ->
                                                 val layout = textLayoutResult ?: return@detectTapGestures
+                                                val activeText = currentAnnotatedText
                                                 val charOffset = layout.getOffsetForPosition(tapOffset)
-                                                annotatedPageText.getStringAnnotations(
+                                                activeText.getStringAnnotations(
                                                     tag = "AYAH_TAP",
                                                     start = charOffset,
                                                     end = charOffset
@@ -2804,14 +3310,15 @@ private fun MushafPageContent(
                                                     val aNum = parts.getOrNull(1)?.toIntOrNull()
                                                     val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
                                                     if (matched != null) {
-                                                        onVerseClicked(matched)
+                                                        currentOnVerseClicked(matched)
                                                     }
                                                 }
                                             },
                                             onDoubleTap = { tapOffset ->
                                                 val layout = textLayoutResult ?: return@detectTapGestures
+                                                val activeText = currentAnnotatedText
                                                 val charOffset = layout.getOffsetForPosition(tapOffset)
-                                                annotatedPageText.getStringAnnotations(
+                                                activeText.getStringAnnotations(
                                                     tag = "AYAH_TAP",
                                                     start = charOffset,
                                                     end = charOffset
@@ -2821,20 +3328,21 @@ private fun MushafPageContent(
                                                     val aNum = parts.getOrNull(1)?.toIntOrNull()
                                                     val matched = groupVerses.find { it.surahNumber == sNum && it.ayahNumber == aNum }
                                                     if (matched != null) {
-                                                        onVerseDoubleTapped(matched)
+                                                        currentOnVerseDoubleTapped(matched)
                                                     }
                                                 }
                                             },
                                             onLongPress = { longPressOffset ->
                                                 val layout = textLayoutResult ?: return@detectTapGestures
+                                                val activeText = currentAnnotatedText
                                                 val charOffset = layout.getOffsetForPosition(longPressOffset)
                                                 val minSearch = (charOffset - 2).coerceAtLeast(0)
-                                                val maxSearch = (charOffset + 2).coerceAtMost(annotatedPageText.length)
-                                                val wordAnnotation = annotatedPageText.getStringAnnotations(
+                                                val maxSearch = (charOffset + 2).coerceAtMost(activeText.length)
+                                                val wordAnnotation = activeText.getStringAnnotations(
                                                     tag = "WORD_TAP",
                                                     start = charOffset,
                                                     end = charOffset
-                                                ).firstOrNull() ?: annotatedPageText.getStringAnnotations(
+                                                ).firstOrNull() ?: activeText.getStringAnnotations(
                                                     tag = "WORD_TAP",
                                                     start = minSearch,
                                                     end = maxSearch
@@ -2849,7 +3357,7 @@ private fun MushafPageContent(
                                                     val totalW = segments.getOrNull(1)?.toIntOrNull() ?: 1
                                                     val wText = segments.getOrNull(2).orEmpty()
                                                     if (sNum != null && aNum != null && wIdx != null && wText.isNotBlank()) {
-                                                        onWordLongPressed(sNum, aNum, wIdx, totalW, wText)
+                                                        currentOnWordLongPressed(sNum, aNum, wIdx, totalW, wText)
                                                     }
                                                 }
                                             }
@@ -2867,7 +3375,10 @@ private fun MushafPageContent(
                         .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(verses) { v ->
+                    items(
+                        items = verses,
+                        key = { "${it.surahNumber}:${it.ayahNumber}" }
+                    ) { v ->
                         val tagKey = "${v.surahNumber}:${v.ayahNumber}"
                         val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
                         val isMemorized = memorizedAyahKeys.contains(tagKey)
@@ -2880,7 +3391,7 @@ private fun MushafPageContent(
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onVerseClicked(v) }
                                 .border(
-                                    width = if (isFocusedReading || isBookmarked || isMemorized) 1.6.dp else 0.6.dp,
+                                    width = 1.2.dp,
                                     color = when {
                                         isFocusedReading -> if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
                                         isBookmarked -> EmeraldGreen
@@ -2891,9 +3402,9 @@ private fun MushafPageContent(
                                 ),
                             colors = CardDefaults.cardColors(
                                 containerColor = when {
-                                    isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFCFD6DF)
+                                    isFocusedReading -> if (isNightMode) Color(0xFF334155) else Color(0xFFE5EAF0)
                                     isNightMode -> Color(0xFF162A3F).copy(alpha = 0.55f)
-                                    else -> Color(0xFFF6EFE0).copy(alpha = 0.72f)
+                                    else -> Color(0xFFFFFFFF)
                                 }
                             )
                         ) {
@@ -2913,6 +3424,32 @@ private fun MushafPageContent(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        if (v.startsNewRub && !(v.surahNumber == 1 && v.ayahNumber == 1)) {
+                                            val rubAccent = rubFractionAccentColor(v.rubInHizb, isNightMode)
+                                            Surface(
+                                                color = rubAccent.copy(alpha = 0.14f),
+                                                border = BorderStroke(0.9.dp, rubAccent),
+                                                shape = RoundedCornerShape(50)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    RubAlHizbStarIcon(
+                                                        isNightMode = isNightMode,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Text(
+                                                        text = rubFractionLabel(v.rubInHizb, v.hizb),
+                                                        color = rubAccent,
+                                                        fontFamily = AmiriFontFamily,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.ExtraBold
+                                                    )
+                                                }
+                                            }
+                                        }
                                         if (isSajdahVerse) {
                                             Surface(
                                                 color = divineNameColor.copy(alpha = 0.15f),
@@ -2973,47 +3510,56 @@ private fun MushafPageContent(
                                             activeWordKey = activeWordKey,
                                             activeWordHighlightColor = activeWordHighlightColor
                                         )
-                                        withStyle(
-                                            SpanStyle(
-                                                color = if (isBookmarked) EmeraldGreen else if (isNightMode) GoldAccent else Color(0xFF9A6F0B)
-                                            )
-                                        ) {
-                                            append("\u00A0﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                        val markerColor = if (isBookmarked) EmeraldGreen else if (isNightMode) GoldAccent else Color(0xFF9A6F0B)
+                                        withStyle(SpanStyle(color = markerColor)) {
+                                            append("\u202F")
                                         }
                                         if (isBookmarked) {
-                                            withStyle(SpanStyle(color = Color.Transparent)) {
-                                                append("\u00A0")
-                                            }
-                                            pushStringAnnotation(tag = "WAQF_RIBBON_ANCHOR", annotation = tagKey)
-                                            withStyle(SpanStyle(color = Color.Transparent)) {
-                                                append("٠٠")
-                                            }
+                                            pushStringAnnotation(tag = "BOOKMARKED_AYAH_MARKER", annotation = tagKey)
+                                        }
+                                        withStyle(SpanStyle(color = markerColor)) {
+                                            append("﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
+                                        }
+                                        if (isBookmarked) {
                                             pop()
                                         }
                                     }
                                 }
 
                                 var ayahTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+                                val currentColoredAyahText by rememberUpdatedState(coloredAyahText)
+                                val currentOnVerseClickedCard by rememberUpdatedState(onVerseClicked)
+                                val currentOnVerseDoubleTappedCard by rememberUpdatedState(onVerseDoubleTapped)
+                                val currentOnWordLongPressedCard by rememberUpdatedState(onWordLongPressed)
 
                                 Text(
                                     text = coloredAyahText,
                                     onTextLayout = { ayahTextLayout = it },
-                                    fontFamily = AmiriFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = fontScaleSp.sp,
-                                    lineHeight = (fontScaleSp * 1.55f).sp,
-                                    textAlign = TextAlign.Right,
+                                    style = TextStyle(
+                                        fontFamily = AmiriFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = fontScaleSp.sp,
+                                        lineHeight = (fontScaleSp * 1.65f).sp,
+                                        fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = true),
+                                        lineHeightStyle = LineHeightStyle(
+                                            alignment = LineHeightStyle.Alignment.Center,
+                                            trim = LineHeightStyle.Trim.None
+                                        ),
+                                        textAlign = TextAlign.Right,
+                                        textDirection = TextDirection.Rtl
+                                    ),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .drawWithContent {
                                             drawContent()
                                             val layout = ayahTextLayout ?: return@drawWithContent
-                                            val ribbonAnns = coloredAyahText.getStringAnnotations(
-                                                tag = "WAQF_RIBBON_ANCHOR",
+                                            val rubStarAnns = coloredAyahText.getStringAnnotations(
+                                                tag = "RUB_STAR_ANCHOR",
                                                 start = 0,
                                                 end = coloredAyahText.length
                                             )
-                                            for (ann in ribbonAnns) {
+                                            for (ann in rubStarAnns) {
                                                 if (ann.start < ann.end && ann.end <= coloredAyahText.length) {
                                                     val box0 = layout.getBoundingBox(ann.start)
                                                     val box1 = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
@@ -3022,34 +3568,64 @@ private fun MushafPageContent(
                                                     val lineIdx = layout.getLineForOffset(ann.start)
                                                     val lineTop = layout.getLineTop(lineIdx)
                                                     val lineBottom = layout.getLineBottom(lineIdx)
-                                                    val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
-                                                    val ribbonH = lineH * 0.86f
-                                                    val ribbonW = (maxRight - minLeft).coerceAtLeast(lineH * 0.44f)
+                                                    val lineH = (lineBottom - lineTop).coerceAtLeast(18f)
+                                                    val starSize = maxOf(maxRight - minLeft, lineH * 0.85f)
                                                     val cx = (minLeft + maxRight) * 0.5f
                                                     val cy = (lineTop + lineBottom) * 0.5f
+                                                    drawRubAlHizbStarOnCanvas(
+                                                        cx = cx,
+                                                        cy = cy,
+                                                        radius = starSize * 0.46f,
+                                                        isNightMode = isNightMode
+                                                    )
+                                                }
+                                            }
+                                            val ribbonAnns = coloredAyahText.getStringAnnotations(
+                                                tag = "BOOKMARKED_AYAH_MARKER",
+                                                start = 0,
+                                                end = coloredAyahText.length
+                                            )
+                                            for (ann in ribbonAnns) {
+                                                if (ann.start < ann.end && ann.end <= coloredAyahText.length) {
+                                                    val boxOpen = layout.getBoundingBox(ann.start)
+                                                    val boxClose = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
+                                                    val markerLeft = minOf(boxOpen.left, boxClose.left)
+                                                    val closeW = (boxClose.right - boxClose.left).coerceAtLeast(6f)
+                                                    val lineIdx = layout.getLineForOffset(ann.start)
+                                                    val lineTop = layout.getLineTop(lineIdx)
+                                                    val lineBottom = layout.getLineBottom(lineIdx)
+                                                    val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
+                                                    val ribbonW = (lineH * 0.28f).coerceAtLeast(8f)
+                                                    val ribbonH = (lineH * 0.58f).coerceAtLeast(14f)
+                                                    val cx = (markerLeft + closeW * 0.14f).coerceIn(
+                                                        ribbonW * 0.5f,
+                                                        (size.width - ribbonW * 0.5f).coerceAtLeast(ribbonW * 0.5f)
+                                                    )
+                                                    val topY = lineTop + lineH * 0.04f
                                                     drawWaqfGreenRibbonOnCanvas(
                                                         left = cx - ribbonW * 0.5f,
-                                                        top = cy - ribbonH * 0.5f,
+                                                        top = topY,
                                                         width = ribbonW,
                                                         height = ribbonH
                                                     )
                                                 }
                                             }
                                         }
-                                        .pointerInput(coloredAyahText, v) {
+                                        .pointerInput(v) {
                                             detectTapGestures(
-                                                onTap = { onVerseClicked(v) },
-                                                onDoubleTap = { onVerseDoubleTapped(v) },
+                                                onTap = { currentOnVerseClickedCard(v) },
+                                                onDoubleTap = { currentOnVerseDoubleTappedCard(v) },
                                                 onLongPress = { longPressOffset ->
                                                     val layout = ayahTextLayout ?: return@detectTapGestures
+                                                    val activeText = currentColoredAyahText
                                                     val charOffset = layout.getOffsetForPosition(longPressOffset)
                                                     val minSearch = (charOffset - 2).coerceAtLeast(0)
-                                                    val maxSearch = (charOffset + 2).coerceAtMost(coloredAyahText.length)
-                                                    val wordAnnotation = coloredAyahText.getStringAnnotations(
+                                                    val maxSearch = (charOffset + 2).coerceAtMost(activeText.length)
+                                                    val wordAnnotation = activeText.getStringAnnotations(
                                                         tag = "WORD_TAP",
                                                         start = charOffset,
                                                         end = charOffset
-                                                    ).firstOrNull() ?: coloredAyahText.getStringAnnotations(
+                                                    ).firstOrNull() ?: activeText.getStringAnnotations(
                                                         tag = "WORD_TAP",
                                                         start = minSearch,
                                                         end = maxSearch
@@ -3064,7 +3640,7 @@ private fun MushafPageContent(
                                                         val totalW = segments.getOrNull(1)?.toIntOrNull() ?: 1
                                                         val wText = segments.getOrNull(2).orEmpty()
                                                         if (sNum != null && aNum != null && wIdx != null && wText.isNotBlank()) {
-                                                            onWordLongPressed(sNum, aNum, wIdx, totalW, wText)
+                                                            currentOnWordLongPressedCard(sNum, aNum, wIdx, totalW, wText)
                                                         }
                                                     }
                                                 }
@@ -3076,7 +3652,7 @@ private fun MushafPageContent(
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
                                         color = if (isNightMode) Color(0xFF0E1D2F).copy(alpha = 0.85f)
-                                        else Color(0xFFEDE2CC).copy(alpha = 0.72f),
+                                        else Color(0xFFF6F8FA),
                                         border = BorderStroke(0.8.dp, GoldBorder.copy(alpha = 0.55f)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
@@ -3123,7 +3699,7 @@ private fun MushafPageContent(
                 // Right in RTL: Previous Page Button
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFF3E9D2),
+                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFFAFBFD),
                     border = BorderStroke(0.8.dp, GoldBorder),
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
@@ -3144,7 +3720,7 @@ private fun MushafPageContent(
                             fontFamily = AmiriFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
-                            color = if (isNightMode) GoldAccent else Color(0xFF1A110B)
+                            color = if (isNightMode) GoldAccent else Color(0xFF111111)
                         )
                     }
                 }
@@ -3152,7 +3728,7 @@ private fun MushafPageContent(
                 // Center: Ornamental Page Number Medallion ﴿ ٣ ﴾
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFF3E9D2),
+                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFFAFBFD),
                     border = BorderStroke(1.2.dp, GoldAccent)
                 ) {
                     Text(
@@ -3160,7 +3736,7 @@ private fun MushafPageContent(
                         fontFamily = AmiriFontFamily,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 13.sp,
-                        color = if (isNightMode) GoldAccent else Color(0xFF1A110B),
+                        color = if (isNightMode) GoldAccent else Color(0xFF111111),
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp)
                     )
                 }
@@ -3168,7 +3744,7 @@ private fun MushafPageContent(
                 // Left in RTL: Next Page Button
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFF3E9D2),
+                    color = if (isNightMode) Color(0xFF162A3F) else Color(0xFFFAFBFD),
                     border = BorderStroke(0.8.dp, GoldBorder),
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
@@ -3183,7 +3759,7 @@ private fun MushafPageContent(
                             fontFamily = AmiriFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
-                            color = if (isNightMode) GoldAccent else Color(0xFF1A110B)
+                            color = if (isNightMode) GoldAccent else Color(0xFF111111)
                         )
                         Icon(
                             imageVector = Icons.Default.NavigateBefore,
@@ -3198,6 +3774,139 @@ private fun MushafPageContent(
     }
 }
 
+private fun rubFractionShortLabel(rubInHizb: Int): String = when (rubInHizb) {
+    1 -> "بداية الحزب"
+    2 -> "ربع الحزب"
+    3 -> "نصف الحزب"
+    4 -> "ثلاثة أرباع الحزب"
+    else -> "ربع الحزب"
+}
+
+private fun rubFractionLabel(rubInHizb: Int, hizbNumber: Int): String {
+    val hizbAr = toArabicIndicDigits(hizbNumber)
+    return when (rubInHizb) {
+        1 -> "بداية الحزب $hizbAr"
+        2 -> "ربع الحزب $hizbAr"
+        3 -> "نصف الحزب $hizbAr"
+        4 -> "ثلاثة أرباع الحزب $hizbAr"
+        else -> "الحزب $hizbAr"
+    }
+}
+
+private fun rubFractionAccentColor(rubInHizb: Int, isNightMode: Boolean): Color = when (rubInHizb) {
+    1 -> if (isNightMode) Color(0xFF34D399) else Color(0xFF067A4F) // بداية الحزب
+    2 -> if (isNightMode) Color(0xFF38BDF8) else Color(0xFF0E7490) // ربع الحزب
+    3 -> if (isNightMode) Color(0xFFFBBF24) else Color(0xFFB45309) // نصف الحزب
+    4 -> if (isNightMode) Color(0xFFC084FC) else Color(0xFF6D28D9) // ثلاثة أرباع الحزب
+    else -> if (isNightMode) GoldAccent else Color(0xFF0F5257)
+}
+
+@Composable
+private fun RubAlHizbMilestoneBanner(
+    rubStartVerses: List<OfflineVerse>,
+    isNightMode: Boolean
+) {
+    val primary = rubStartVerses.first()
+    val accent = rubFractionAccentColor(primary.rubInHizb, isNightMode)
+    val bannerText = remember(rubStartVerses) {
+        rubStartVerses.joinToString("  |  ") { v ->
+            "${rubFractionLabel(v.rubInHizb, v.hizb)} (آية ${toArabicIndicDigits(v.ayahNumber)})"
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("rub_al_hizb_banner"),
+        shape = RoundedCornerShape(10.dp),
+        color = if (isNightMode) accent.copy(alpha = 0.16f) else accent.copy(alpha = 0.09f),
+        border = BorderStroke(1.3.dp, accent.copy(alpha = 0.85f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RubAlHizbStarIcon(
+                isNightMode = isNightMode,
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = bannerText,
+                fontFamily = AmiriFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 14.5.sp,
+                color = accent,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
+            )
+            RubAlHizbStarIcon(
+                isNightMode = isNightMode,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawRubAlHizbStarOnCanvas(
+    cx: Float,
+    cy: Float,
+    radius: Float,
+    isNightMode: Boolean
+) {
+    val rOuter = radius.coerceAtLeast(6f)
+    val goldColor = if (isNightMode) Color(0xFFF5D06B) else Color(0xFFC8961E)
+    val emeraldOuter = if (isNightMode) Color(0xFF10B981) else Color(0xFF066C46)
+    val innerFill = if (isNightMode) Color(0xFF0D2137) else Color(0xFFFFFFFF)
+
+    fun drawOctagram(r: Float, color: Color) {
+        val halfSide = r * 0.7071f
+        val sq1 = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx - halfSide, cy - halfSide)
+            lineTo(cx + halfSide, cy - halfSide)
+            lineTo(cx + halfSide, cy + halfSide)
+            lineTo(cx - halfSide, cy + halfSide)
+            close()
+        }
+        drawPath(path = sq1, color = color)
+
+        val sq2 = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx, cy - r)
+            lineTo(cx + r, cy)
+            lineTo(cx, cy + r)
+            lineTo(cx - r, cy)
+            close()
+        }
+        drawPath(path = sq2, color = color)
+    }
+
+    drawOctagram(rOuter, goldColor)
+    drawOctagram(rOuter * 0.80f, emeraldOuter)
+    drawOctagram(rOuter * 0.56f, innerFill)
+    drawCircle(color = goldColor, radius = rOuter * 0.24f, center = androidx.compose.ui.geometry.Offset(cx, cy))
+}
+
+@Composable
+private fun RubAlHizbStarIcon(
+    isNightMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        drawRubAlHizbStarOnCanvas(
+            cx = size.width * 0.5f,
+            cy = size.height * 0.5f,
+            radius = minOf(size.width, size.height) * 0.48f,
+            isNightMode = isNightMode
+        )
+    }
+}
+
 @Composable
 private fun SurahOrnamentalBanner(
     surahNameAr: String,
@@ -3209,7 +3918,7 @@ private fun SurahOrnamentalBanner(
             .fillMaxWidth()
             .padding(vertical = 2.dp),
         shape = RoundedCornerShape(10.dp),
-        color = if (isNightMode) RoyalNavyDark else Color(0xFFEDE0C4),
+        color = if (isNightMode) RoyalNavyDark else Color(0xFFF8F9FA),
         border = BorderStroke(1.2.dp, GoldAccent)
     ) {
         Row(
@@ -3219,10 +3928,9 @@ private fun SurahOrnamentalBanner(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "۞",
-                fontSize = 15.sp,
-                color = GoldAccent
+            RubAlHizbStarIcon(
+                isNightMode = isNightMode,
+                modifier = Modifier.size(18.dp)
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -3239,13 +3947,12 @@ private fun SurahOrnamentalBanner(
                     text = "(${revelationPlaceAr})",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isNightMode) Color.White.copy(alpha = 0.78f) else Color(0xFF5C4E3C)
+                    color = if (isNightMode) Color.White.copy(alpha = 0.78f) else Color(0xFF4B5563)
                 )
             }
-            Text(
-                text = "۞",
-                fontSize = 15.sp,
-                color = GoldAccent
+            RubAlHizbStarIcon(
+                isNightMode = isNightMode,
+                modifier = Modifier.size(18.dp)
             )
         }
     }

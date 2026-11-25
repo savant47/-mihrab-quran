@@ -20,9 +20,25 @@ data class OfflineVerse(
     val juz: Int,
     val hizb: Int = 1,
     val rubInHizb: Int = 1,
+    val startsNewRub: Boolean = false,
     val page: Int,
     val isSajda: Boolean,
-    val normalizedTextAr: String
+    val normalizedTextAr: String,
+    val searchCanonicalTextAr: String = normalizedTextAr,
+    val searchSkeletonTextAr: String = normalizedTextAr
+)
+
+data class QuranSearchMatch(
+    val verse: OfflineVerse,
+    val occurrenceCount: Int,
+    val isExactMatch: Boolean
+)
+
+data class QuranSearchResult(
+    val query: String,
+    val totalMatchingVerses: Int,
+    val totalWordOccurrences: Int,
+    val matches: List<QuranSearchMatch>
 )
 
 data class OfflineSurah(
@@ -49,6 +65,30 @@ object OfflineQuranDatabase {
         "58:1", "61:1", "62:1", "65:1", "67:1", "68:1", "69:1", "72:1",
         "75:1", "78:1", "80:1", "82:1", "84:1", "87:1", "90:1", "94:1"
     )
+
+    private val uthmaniWawAlefRegex = Regex("و\\u0670")
+    private val uthmaniYaAlefTaMarbutaRegex = Regex("ى\\u0670(?=[ةه])")
+    private val uthmaniStandaloneSuperAlefRegex = Regex("\\u0670")
+
+    /**
+     * Converts Uthmani Quranic orthography (e.g., ٱلصَّلَوٰةَ, ٱلزَّكَوٰةَ, ٱلْحَيَوٰةِ, ٱلتَّوْرَىٰةَ, ٱلرَّحْمَٰنِ)
+     * into standard searchable Arabic form before normalizing diacritics so standard keyboard queries
+     * like "الصلاة", "الزكاة", "الحياة", "التوراة", "الكتاب", "السماوات" match instantly.
+     */
+    fun toSearchCanonicalArabic(input: String): String {
+        val preNormalized = input
+            .replace(uthmaniWawAlefRegex, "ا")
+            .replace(uthmaniYaAlefTaMarbutaRegex, "ا")
+        return QuranTextMatcher.normalizeArabic(preNormalized)
+    }
+
+    private fun toSearchSkeletonLine(canonicalText: String): String {
+        if (canonicalText.isEmpty()) return ""
+        return canonicalText
+            .split(' ')
+            .filter { it.isNotEmpty() }
+            .joinToString(" ") { QuranTextMatcher.toUthmaniSkeleton(it) }
+    }
 
     @Volatile
     private var isLoaded = false
@@ -105,7 +145,8 @@ object OfflineQuranDatabase {
                         val page = vObj.optInt("p", 1).coerceIn(1, 604)
                         val sajda = vObj.optBoolean("s", false)
 
-                        if (arText.contains('\u06DE') || SURAH_START_RUB_KEYS.contains("$sNum:$vNum")) {
+                        val startsNewRub = arText.contains('\u06DE') || SURAH_START_RUB_KEYS.contains("$sNum:$vNum")
+                        if (startsNewRub) {
                             currentRubIndex++
                         }
                         val safeRubIdx = currentRubIndex.coerceIn(0, 239)
@@ -113,6 +154,10 @@ object OfflineQuranDatabase {
                         val exactRubInHizb = ((safeRubIdx % 4) + 1).coerceIn(1, 4)
 
                         if (j == 0) firstPage = page
+
+                        val normAr = QuranTextMatcher.normalizeArabic(arText)
+                        val canonAr = toSearchCanonicalArabic(arText)
+                        val skelAr = toSearchSkeletonLine(canonAr)
 
                         val verse = OfflineVerse(
                             surahNumber = sNum,
@@ -126,9 +171,12 @@ object OfflineQuranDatabase {
                             juz = juz,
                             hizb = exactHizb,
                             rubInHizb = exactRubInHizb,
+                            startsNewRub = startsNewRub,
                             page = page,
                             isSajda = sajda,
-                            normalizedTextAr = QuranTextMatcher.normalizeArabic(arText)
+                            normalizedTextAr = normAr,
+                            searchCanonicalTextAr = canonAr,
+                            searchSkeletonTextAr = skelAr
                         )
                         surahVerses.add(verse)
                         loadedVerses.add(verse)
@@ -242,18 +290,233 @@ object OfflineQuranDatabase {
         return allSurahs.getOrNull(surahNumber - 1)?.verses ?: emptyList()
     }
 
-    fun searchVerses(context: Context, query: String, limit: Int = 30): List<OfflineVerse> {
-        ensureLoadedSynchronously(context)
-        val normQuery = QuranTextMatcher.normalizeArabic(query)
-        if (normQuery.length < 2) return emptyList()
+    private fun wordMatchesQuery(
+        normWord: String,
+        canonWord: String,
+        skelWord: String,
+        normQ: String,
+        canonQ: String,
+        skelQ: String,
+        exactWholeWordOnly: Boolean
+    ): Pair<Boolean, Boolean> {
+        val isExact = normWord == normQ ||
+            canonWord == canonQ ||
+            (skelQ.length >= 3 && skelWord == skelQ)
+        if (isExact) return true to true
+        if (exactWholeWordOnly) return false to false
 
-        val results = ArrayList<OfflineVerse>()
-        for (v in allVersesList) {
-            if (v.normalizedTextAr.contains(normQuery) || v.surahNameAr.contains(query.trim())) {
-                results.add(v)
-                if (results.size >= limit) break
+        val isPartial = normWord.contains(normQ) ||
+            canonWord.contains(canonQ) ||
+            (skelQ.length >= 3 && skelWord.contains(skelQ))
+        return isPartial to false
+    }
+
+    /**
+     * Instant offline search across all 6,236 verses of the Mushaf.
+     * Supports standard Arabic keyboard spelling as well as Uthmani script,
+     * counts exact total matching verses and total word occurrences,
+     * and ranks exact whole-word/phrase matches above partial matches.
+     */
+    fun searchVersesInstant(
+        context: Context,
+        query: String,
+        exactWholeWordOnly: Boolean = false,
+        limit: Int = 800
+    ): QuranSearchResult {
+        ensureLoadedSynchronously(context)
+        val trimmed = query.trim()
+        val normQuery = QuranTextMatcher.normalizeArabic(trimmed)
+        val canonQuery = toSearchCanonicalArabic(trimmed)
+        if (normQuery.length < 2 && canonQuery.length < 2) {
+            return QuranSearchResult(query = trimmed, totalMatchingVerses = 0, totalWordOccurrences = 0, matches = emptyList())
+        }
+
+        val normQueryWords = normQuery.split(' ').filter { it.isNotEmpty() }
+        val canonQueryWords = canonQuery.split(' ').filter { it.isNotEmpty() }
+        val skelQueryWords = canonQueryWords.map { QuranTextMatcher.toUthmaniSkeleton(it) }
+        val qLen = canonQueryWords.size
+        if (qLen == 0) {
+            return QuranSearchResult(query = trimmed, totalMatchingVerses = 0, totalWordOccurrences = 0, matches = emptyList())
+        }
+
+        val exactMatches = ArrayList<QuranSearchMatch>()
+        val partialMatches = ArrayList<QuranSearchMatch>()
+        var totalOccurrences = 0
+
+        if (qLen == 1) {
+            val nq = normQueryWords[0]
+            val cq = canonQueryWords[0]
+            val sq = skelQueryWords[0]
+
+            for (v in allVersesList) {
+                // Fast pre-check before splitting
+                val maybeHit = v.normalizedTextAr.contains(nq) ||
+                    v.searchCanonicalTextAr.contains(cq) ||
+                    (sq.length >= 3 && v.searchSkeletonTextAr.contains(sq))
+                if (!maybeHit) continue
+
+                val normTokens = v.normalizedTextAr.split(' ')
+                val canonTokens = v.searchCanonicalTextAr.split(' ')
+                val skelTokens = v.searchSkeletonTextAr.split(' ')
+                val countTokens = minOf(normTokens.size, canonTokens.size, skelTokens.size)
+
+                var verseHits = 0
+                var hasExact = false
+                for (idx in 0 until countTokens) {
+                    val (matched, exact) = wordMatchesQuery(
+                        normWord = normTokens[idx],
+                        canonWord = canonTokens[idx],
+                        skelWord = skelTokens[idx],
+                        normQ = nq,
+                        canonQ = cq,
+                        skelQ = sq,
+                        exactWholeWordOnly = exactWholeWordOnly
+                    )
+                    if (matched) {
+                        verseHits++
+                        if (exact) hasExact = true
+                    }
+                }
+                if (verseHits > 0) {
+                    totalOccurrences += verseHits
+                    val item = QuranSearchMatch(verse = v, occurrenceCount = verseHits, isExactMatch = hasExact)
+                    if (hasExact) exactMatches.add(item) else partialMatches.add(item)
+                }
+            }
+        } else {
+            val skelPhrase = skelQueryWords.joinToString(" ")
+            for (v in allVersesList) {
+                val fastHit = v.normalizedTextAr.contains(normQuery) ||
+                    v.searchCanonicalTextAr.contains(canonQuery) ||
+                    (skelPhrase.length >= 4 && v.searchSkeletonTextAr.contains(skelPhrase))
+                if (!fastHit) continue
+
+                val normTokens = v.normalizedTextAr.split(' ').filter { it.isNotEmpty() }
+                val canonTokens = v.searchCanonicalTextAr.split(' ').filter { it.isNotEmpty() }
+                val skelTokens = v.searchSkeletonTextAr.split(' ').filter { it.isNotEmpty() }
+                val countTokens = minOf(normTokens.size, canonTokens.size, skelTokens.size)
+
+                var verseHits = 0
+                var hasExact = false
+                if (countTokens >= qLen) {
+                    for (start in 0..(countTokens - qLen)) {
+                        var allMatch = true
+                        var allExact = true
+                        for (k in 0 until qLen) {
+                            val requireWhole = exactWholeWordOnly || (k in 1 until (qLen - 1))
+                            val (matched, exact) = wordMatchesQuery(
+                                normWord = normTokens[start + k],
+                                canonWord = canonTokens[start + k],
+                                skelWord = skelTokens[start + k],
+                                normQ = normQueryWords.getOrElse(k) { canonQueryWords[k] },
+                                canonQ = canonQueryWords[k],
+                                skelQ = skelQueryWords[k],
+                                exactWholeWordOnly = requireWhole
+                            )
+                            if (!matched) {
+                                allMatch = false
+                                break
+                            }
+                            if (!exact) allExact = false
+                        }
+                        if (allMatch) {
+                            verseHits++
+                            if (allExact) hasExact = true
+                        }
+                    }
+                }
+                if (verseHits == 0 && !exactWholeWordOnly && (v.normalizedTextAr.contains(normQuery) || v.searchCanonicalTextAr.contains(canonQuery))) {
+                    verseHits = 1
+                }
+                if (verseHits > 0) {
+                    totalOccurrences += verseHits
+                    val item = QuranSearchMatch(verse = v, occurrenceCount = verseHits, isExactMatch = hasExact)
+                    if (hasExact) exactMatches.add(item) else partialMatches.add(item)
+                }
             }
         }
-        return results
+
+        val combined = ArrayList<QuranSearchMatch>(exactMatches.size + partialMatches.size)
+        combined.addAll(exactMatches)
+        combined.addAll(partialMatches)
+
+        return QuranSearchResult(
+            query = trimmed,
+            totalMatchingVerses = combined.size,
+            totalWordOccurrences = totalOccurrences,
+            matches = if (combined.size > limit) combined.subList(0, limit) else combined
+        )
+    }
+
+    /**
+     * Returns the 0-based whitespace-split word indices in `rawVerseText` that match `query`,
+     * enabling diacritic-safe visual highlighting directly on the original Uthmani text.
+     */
+    fun findMatchingWordIndicesInVerse(
+        rawVerseText: String,
+        query: String,
+        exactWholeWordOnly: Boolean = false
+    ): Set<Int> {
+        val trimmed = query.trim()
+        val normQuery = QuranTextMatcher.normalizeArabic(trimmed)
+        val canonQuery = toSearchCanonicalArabic(trimmed)
+        val normQueryWords = normQuery.split(' ').filter { it.isNotEmpty() }
+        val canonQueryWords = canonQuery.split(' ').filter { it.isNotEmpty() }
+        val skelQueryWords = canonQueryWords.map { QuranTextMatcher.toUthmaniSkeleton(it) }
+        val qLen = canonQueryWords.size
+        if (qLen == 0) return emptySet()
+
+        val rawTokens = rawVerseText.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val normTokens = rawTokens.map { QuranTextMatcher.normalizeArabic(it) }
+        val canonTokens = rawTokens.map { toSearchCanonicalArabic(it) }
+        val skelTokens = canonTokens.map { QuranTextMatcher.toUthmaniSkeleton(it) }
+
+        val matchedIndices = HashSet<Int>()
+        if (qLen == 1) {
+            val nq = normQueryWords[0]
+            val cq = canonQueryWords[0]
+            val sq = skelQueryWords[0]
+            for (i in rawTokens.indices) {
+                val (matched, _) = wordMatchesQuery(
+                    normWord = normTokens[i],
+                    canonWord = canonTokens[i],
+                    skelWord = skelTokens[i],
+                    normQ = nq,
+                    canonQ = cq,
+                    skelQ = sq,
+                    exactWholeWordOnly = exactWholeWordOnly
+                )
+                if (matched) matchedIndices.add(i)
+            }
+        } else if (rawTokens.size >= qLen) {
+            for (start in 0..(rawTokens.size - qLen)) {
+                var allMatch = true
+                for (k in 0 until qLen) {
+                    val requireWhole = exactWholeWordOnly || (k in 1 until (qLen - 1))
+                    val (matched, _) = wordMatchesQuery(
+                        normWord = normTokens[start + k],
+                        canonWord = canonTokens[start + k],
+                        skelWord = skelTokens[start + k],
+                        normQ = normQueryWords.getOrElse(k) { canonQueryWords[k] },
+                        canonQ = canonQueryWords[k],
+                        skelQ = skelQueryWords[k],
+                        exactWholeWordOnly = requireWhole
+                    )
+                    if (!matched) {
+                        allMatch = false
+                        break
+                    }
+                }
+                if (allMatch) {
+                    for (k in 0 until qLen) matchedIndices.add(start + k)
+                }
+            }
+        }
+        return matchedIndices
+    }
+
+    fun searchVerses(context: Context, query: String, limit: Int = 30): List<OfflineVerse> {
+        return searchVersesInstant(context, query, exactWholeWordOnly = false, limit = limit).matches.map { it.verse }
     }
 }
+

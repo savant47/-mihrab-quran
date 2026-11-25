@@ -9,7 +9,11 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 
 val AmiriFontFamily = FontFamily(
-    Font(R.font.amiri, FontWeight.Normal)
+    Font(R.font.amiri, FontWeight.Normal),
+    Font(R.font.amiri, FontWeight.Medium),
+    Font(R.font.amiri, FontWeight.SemiBold),
+    Font(R.font.amiri_bold, FontWeight.Bold),
+    Font(R.font.amiri_bold, FontWeight.ExtraBold)
 )
 
 val AppTypography = Typography(
