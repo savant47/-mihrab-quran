@@ -452,7 +452,7 @@ fun ComprehensiveSettingsAndGuideTab(
     val localStorage = remember { LocalKhatmaStorage.getInstance(context) }
     val restoreVersion by localStorage.backupRestoreVersionFlow.collectAsState()
 
-    var expandedSection by remember { mutableStateOf<String?>("user_guide") }
+    var expandedSection by remember { mutableStateOf<String?>(null) }
     var showAdhanSettingsModal by remember { mutableStateOf(false) }
     var isPlayingAdhanPreview by remember { mutableStateOf(false) }
 
@@ -588,13 +588,14 @@ fun ComprehensiveSettingsAndGuideTab(
             }
         }
 
-        // 3. CARD 1: Comprehensive User Guide (دليل المستخدم الشامل وطريقة الضغطات)
+        // 3. CARD 1: Comprehensive User Guide (دليل المستخدم الشامل وطريقة الضغطات - مغلق افتراضياً وبلون مميز)
         SettingsExpandableSectionCard(
             title = "📖 دليل استخدام البرنامج والضغطات الذكية",
-            subtitle = "شرح بسيط وواضح لكل ميزة وكل ضغطة داخل المصحف والأذكار والأوراد",
-            icon = Icons.Default.HelpOutline,
-            badgeText = "دليل شامل",
+            subtitle = "اضغط هنا لفتح الدليل وشرح كل ميزة وكل ضغطة داخل المصحف والأذكار والأوراد",
+            icon = Icons.Default.MenuBook,
+            badgeText = if (expandedSection == "user_guide") "إغلاق الدليل" else "اضغط للفتح",
             isExpanded = expandedSection == "user_guide",
+            isFeaturedDistinct = true,
             onToggle = {
                 expandedSection = if (expandedSection == "user_guide") null else "user_guide"
             },
@@ -1187,30 +1188,68 @@ private fun SettingsExpandableSectionCard(
     icon: ImageVector,
     badgeText: String,
     isExpanded: Boolean,
+    isFeaturedDistinct: Boolean = false,
     onToggle: () -> Unit,
     testTag: String,
     content: @Composable () -> Unit
 ) {
+    val cardBorderWidth = when {
+        isFeaturedDistinct -> 2.dp
+        isExpanded -> 1.6.dp
+        else -> 1.dp
+    }
+    val cardBorderColor = when {
+        isFeaturedDistinct -> GoldAccent
+        isExpanded -> EmeraldGreen
+        else -> GoldBorder
+    }
+    val cardContainerColor = if (isFeaturedDistinct) {
+        Color(0xFFF7EED8)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .border(
-                width = if (isExpanded) 1.6.dp else 1.dp,
-                color = if (isExpanded) EmeraldGreen else GoldBorder,
+                width = cardBorderWidth,
+                color = cardBorderColor,
                 shape = RoundedCornerShape(18.dp)
             )
             .testTag(testTag),
         shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isFeaturedDistinct) 4.dp else 1.dp
+        ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = cardContainerColor
         )
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
+            val headerModifier = if (isFeaturedDistinct) {
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color(0xFF09423A),
+                                Color(0xFF0F6256),
+                                Color(0xFF167264)
+                            )
+                        )
+                    )
+                    .clickable { onToggle() }
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+            } else {
+                Modifier
                     .fillMaxWidth()
                     .clickable { onToggle() }
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                    .padding(horizontal = 14.dp, vertical = 13.dp)
+            }
+
+            Row(
+                modifier = headerModifier,
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -1220,17 +1259,35 @@ private fun SettingsExpandableSectionCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
-                            .background(if (isExpanded) EmeraldGreen else Color(0xFFEBE1C9))
-                            .border(1.dp, if (isExpanded) GoldAccent else GoldBorder, CircleShape),
+                            .background(
+                                when {
+                                    isFeaturedDistinct -> GoldAccent
+                                    isExpanded -> EmeraldGreen
+                                    else -> Color(0xFFEBE1C9)
+                                }
+                            )
+                            .border(
+                                width = 1.2.dp,
+                                color = when {
+                                    isFeaturedDistinct -> Color(0xFFFFF3C4)
+                                    isExpanded -> GoldAccent
+                                    else -> GoldBorder
+                                },
+                                shape = CircleShape
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            tint = if (isExpanded) Color.White else EmeraldGreen,
-                            modifier = Modifier.size(19.dp)
+                            tint = when {
+                                isFeaturedDistinct -> Color(0xFF09423A)
+                                isExpanded -> Color.White
+                                else -> EmeraldGreen
+                            },
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
@@ -1238,16 +1295,19 @@ private fun SettingsExpandableSectionCard(
                         Text(
                             text = title,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.5.sp,
-                            color = EmeraldGreen,
-                            maxLines = 1,
+                            fontSize = if (isFeaturedDistinct) 15.sp else 14.5.sp,
+                            lineHeight = 20.sp,
+                            color = if (isFeaturedDistinct) Color.White else EmeraldGreen,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = subtitle,
                             fontSize = 11.sp,
-                            color = Color(0xFF1A110B).copy(alpha = 0.72f),
+                            lineHeight = 16.sp,
+                            fontWeight = if (isFeaturedDistinct) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isFeaturedDistinct) Color(0xFFFBE7A1) else Color(0xFF1A110B).copy(alpha = 0.72f),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1258,25 +1318,32 @@ private fun SettingsExpandableSectionCard(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isExpanded) EmeraldGreen.copy(alpha = 0.12f) else Color(0xFFEBE1C9),
-                        border = BorderStroke(0.7.dp, GoldBorder)
+                        shape = RoundedCornerShape(10.dp),
+                        color = when {
+                            isFeaturedDistinct -> GoldAccent
+                            isExpanded -> EmeraldGreen.copy(alpha = 0.12f)
+                            else -> Color(0xFFEBE1C9)
+                        },
+                        border = BorderStroke(
+                            width = 0.9.dp,
+                            color = if (isFeaturedDistinct) Color(0xFFFFF3C4) else GoldBorder
+                        )
                     ) {
                         Text(
                             text = badgeText,
                             fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldGreen,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isFeaturedDistinct) Color(0xFF1A110B) else EmeraldGreen,
                             maxLines = 1,
                             softWrap = false,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = if (isExpanded) "طي القسم" else "فتح القسم",
-                        tint = GoldAccent
+                        tint = if (isFeaturedDistinct) Color(0xFFFFE082) else GoldAccent
                     )
                 }
             }
@@ -1291,7 +1358,9 @@ private fun SettingsExpandableSectionCard(
                         .fillMaxWidth()
                         .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
                 ) {
-                    HorizontalDivider(color = GoldBorder.copy(alpha = 0.45f))
+                    HorizontalDivider(
+                        color = if (isFeaturedDistinct) GoldAccent.copy(alpha = 0.65f) else GoldBorder.copy(alpha = 0.45f)
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
                     content()
                 }

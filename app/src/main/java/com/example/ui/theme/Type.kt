@@ -16,6 +16,18 @@ val AmiriFontFamily = FontFamily(
     Font(R.font.amiri_bold, FontWeight.ExtraBold)
 )
 
+/**
+ * Dedicated Amiri Quran font family (AmiriQuran-Regular.ttf from Google Fonts)
+ * with tall Quranic vertical metrics (ascent = 1815, descent = -634) applied exclusively to ayah text.
+ */
+val AmiriQuranFontFamily = FontFamily(
+    Font(R.font.amiri_quran, FontWeight.Normal),
+    Font(R.font.amiri_quran, FontWeight.Medium),
+    Font(R.font.amiri_quran, FontWeight.SemiBold),
+    Font(R.font.amiri_quran, FontWeight.Bold),
+    Font(R.font.amiri_quran, FontWeight.ExtraBold)
+)
+
 val AppTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = AmiriFontFamily,

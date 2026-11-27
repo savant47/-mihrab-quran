@@ -44,6 +44,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -51,11 +52,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.PlatformTextStyle
@@ -83,6 +86,7 @@ import com.example.data.OfflineVerse
 import com.example.data.QuranDataHelper
 import com.example.data.QuranSearchResult
 import com.example.ui.theme.AmiriFontFamily
+import com.example.ui.theme.AmiriQuranFontFamily
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldBorder
@@ -2529,61 +2533,26 @@ private fun countSpokenWordsInAyah(rawText: String): Int {
 }
 
 private const val QURAN_OPENTYPE_FONT_FEATURES = "\"liga\" 1, \"calt\" 1, \"mark\" 1, \"mkmk\" 1, \"kern\" 1"
+private val REPEATED_WHITESPACE_REGEX = Regex("\\s+")
 
 /**
- * Builds the exact invariant plain-text character sequence for a verse as rendered by
- * [appendShamarlyColoredQuranText] + the atomic verse-end marker `\u202F﴿...﴾ `.
- * Because this character sequence NEVER depends on bookmark, focus, memorization, or audio state,
- * `textMeasurer` and `Text` always measure and render the exact same characters and line breaks.
+ * Collapses any repeated whitespace in the source ayah string to a single standard space (' ').
+ */
+private fun collapseRepeatedSpaces(rawText: String): String {
+    return rawText.trim().replace(REPEATED_WHITESPACE_REGEX, " ")
+}
+
+/**
+ * Builds the exact invariant plain-text character sequence for a group of verses:
+ * collapsed single spaces, continuous inline Arabic text, and inline ayah number rosette ` ﴿...﴾ `.
  */
 private fun buildCanonicalGroupPlainText(groupVerses: List<OfflineVerse>): String {
     return buildString {
-        groupVerses.forEach { v ->
-            val rawText = v.textAr
-            var index = 0
-            val len = rawText.length
-            while (index < len) {
-                val start = index
-                val isSpace = rawText[index].isWhitespace()
-                while (index < len && rawText[index].isWhitespace() == isSpace) {
-                    index++
-                }
-                val token = rawText.substring(start, index)
-                if (isSpace) {
-                    append(token)
-                } else {
-                    var leadIdx = 0
-                    while (leadIdx < token.length && token[leadIdx] == '\u06DE') {
-                        leadIdx++
-                    }
-                    if (leadIdx > 0) {
-                        append("\u0640\u06DE\u0640\u202F")
-                    }
-                    val remainingToken = token.substring(leadIdx)
-                    if (remainingToken.isNotEmpty()) {
-                        var splitIdx = remainingToken.length
-                        while (splitIdx > 0 && isUthmaniWaqfChar(remainingToken[splitIdx - 1])) {
-                            splitIdx--
-                        }
-                        val coreWord = remainingToken.substring(0, splitIdx)
-                        val trailingWaqf = remainingToken.substring(splitIdx)
-                        if (coreWord.isNotEmpty()) {
-                            append(coreWord)
-                        }
-                        if (trailingWaqf.isNotEmpty()) {
-                            val hasSajdah = trailingWaqf.contains('\u06E9')
-                            val nonSajdahWaqf = trailingWaqf.filter { it != '\u06E9' }
-                            if (nonSajdahWaqf.isNotEmpty()) {
-                                append(nonSajdahWaqf)
-                            }
-                            if (hasSajdah) {
-                                append("\u202F۩")
-                            }
-                        }
-                    }
-                }
-            }
-            append("\u202F﴿${toArabicIndicDigits(v.ayahNumber)}﴾ ")
+        groupVerses.forEachIndexed { idx, v ->
+            if (idx > 0) append(" ")
+            val normalizedAyah = collapseRepeatedSpaces(v.textAr)
+            append(normalizedAyah)
+            append(" ﴿${toArabicIndicDigits(v.ayahNumber)}﴾")
         }
     }
 }
@@ -2599,136 +2568,74 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendShamarlyColor
     activeWordKey: String? = null,
     activeWordHighlightColor: Color = Color.Transparent
 ) {
-    val totalWordsInAyah = if (verseTagKey.isNotEmpty()) countSpokenWordsInAyah(rawText) else 1
+    // 1. Before rendering, collapse any repeated spaces in the source string to a single space.
+    val normalizedText = collapseRepeatedSpaces(rawText)
+    val totalWordsInAyah = if (verseTagKey.isNotEmpty()) countSpokenWordsInAyah(normalizedText) else 1
     var spokenWordCounter = 0
 
-    // IMPORTANT: Never set fontFamily, fontSize, fontWeight, or letterSpacing on inner SpanStyles!
-    // In Android's StaticLayout / TextLine, any MetricAffectingSpan splits the HarfBuzz shaping run,
-    // which breaks OpenType GSUB/GPOS mark-to-base anchoring between a Quranic word and its trailing
-    // Uthmani Waqf mark (\u06D6..\u06DC: ۖ ۗ ۘ ۙ ۚ ۛ ۜ). By only setting non-metric color & background,
-    // HarfBuzz shapes every word and its diacritics/Waqf marks in one locked, rock-solid run.
-    var index = 0
-    val len = rawText.length
-    while (index < len) {
-        val start = index
-        val isSpace = rawText[index].isWhitespace()
-        while (index < len && rawText[index].isWhitespace() == isSpace) {
-            index++
-        }
-        val token = rawText.substring(start, index)
-        if (isSpace) {
+    // 2. Keep each ayah as one continuous inline Arabic text stream with standard single spaces (' ').
+    // Never insert non-breaking spaces (\u00A0, \u202F), never wrap words in separate layout elements,
+    // and never split a word from its trailing Uthmani marks.
+    val tokens = normalizedText.split(' ')
+    tokens.forEachIndexed { tokenIdx, token ->
+        if (tokenIdx > 0) {
             withStyle(
                 SpanStyle(
                     color = baseTextColor,
                     background = bgHighlight
                 )
             ) {
-                append(token)
+                append(" ")
             }
-        } else {
-            // 1. Separate any leading Rub' Al-Hizb symbol '۞' (\u06DE) attached to the start of the first word of a Rub'.
-            // Use a pure Arabic RTL non-breaking token ("\u0640\u06DE\u0640") followed by Narrow No-Break Space ("\u202F")
-            // so BiDi never treats it as an LTR number run and TextAlign.Justify never stretches the gap after the star.
+        }
+        if (token.isNotEmpty()) {
             var leadIdx = 0
             while (leadIdx < token.length && token[leadIdx] == '\u06DE') {
                 leadIdx++
             }
-            if (leadIdx > 0) {
-                pushStringAnnotation(tag = "RUB_STAR_ANCHOR", annotation = verseTagKey.ifEmpty { "rub" })
-                withStyle(
-                    SpanStyle(
-                        color = Color.Transparent,
-                        background = bgHighlight
-                    )
-                ) {
-                    append("\u0640\u06DE\u0640")
-                }
-                pop()
-                withStyle(
-                    SpanStyle(
-                        color = baseTextColor,
-                        background = bgHighlight
-                    )
-                ) {
-                    append("\u202F")
-                }
+            val remainingToken = token.substring(leadIdx)
+            var splitIdx = remainingToken.length
+            while (splitIdx > 0 && isUthmaniWaqfChar(remainingToken[splitIdx - 1])) {
+                splitIdx--
+            }
+            val coreWord = remainingToken.substring(0, splitIdx)
+            val normalizedCore = normalizeWordForDivineNameCheck(coreWord)
+            val isDivineName = normalizedCore in DIVINE_NAME_NORMALIZED_FORMS
+            val isPureWaqfToken = coreWord.isEmpty() || coreWord.all { isUthmaniWaqfChar(it) }
+
+            val isSpokenWord = coreWord.isNotEmpty() && !isPureWaqfToken && verseTagKey.isNotEmpty()
+            if (isSpokenWord) {
+                spokenWordCounter++
+            }
+            val currentWordKey = if (isSpokenWord) "$verseTagKey:$spokenWordCounter" else ""
+            val isWordPronouncing = currentWordKey.isNotEmpty() && currentWordKey == activeWordKey
+            val effectiveWordBg = if (isWordPronouncing) activeWordHighlightColor else bgHighlight
+
+            val tokenColor = when {
+                isWordPronouncing -> Color(0xFF064E3B)
+                isDivineName -> divineNameColor
+                isPureWaqfToken -> waqfColor
+                else -> baseTextColor
             }
 
-            val remainingToken = token.substring(leadIdx)
-            if (remainingToken.isNotEmpty()) {
-                // 2. Separate any trailing Uthmani Waqf marks (\u06D6..\u06DC) or Sajdah symbol (\u06E9)
-                var splitIdx = remainingToken.length
-                while (splitIdx > 0 && isUthmaniWaqfChar(remainingToken[splitIdx - 1])) {
-                    splitIdx--
-                }
-                val coreWord = remainingToken.substring(0, splitIdx)
-                val trailingWaqf = remainingToken.substring(splitIdx)
-
-                val normalized = normalizeWordForDivineNameCheck(coreWord)
-                val isDivineName = normalized in DIVINE_NAME_NORMALIZED_FORMS
-                val isPureWaqfToken = coreWord.isEmpty() || coreWord.all { isUthmaniWaqfChar(it) }
-
-                val isSpokenWord = coreWord.isNotEmpty() && !isPureWaqfToken && verseTagKey.isNotEmpty()
-                if (isSpokenWord) {
-                    spokenWordCounter++
-                }
-                val currentWordKey = if (isSpokenWord) "$verseTagKey:$spokenWordCounter" else ""
-                val isWordPronouncing = currentWordKey.isNotEmpty() && currentWordKey == activeWordKey
-                val effectiveWordBg = if (isWordPronouncing) activeWordHighlightColor else bgHighlight
-
-                if (coreWord.isNotEmpty()) {
-                    val wordColor = when {
-                        isWordPronouncing -> Color(0xFF064E3B)
-                        isDivineName -> divineNameColor
-                        isPureWaqfToken -> waqfColor
-                        else -> baseTextColor
-                    }
-
-                    if (isSpokenWord) {
-                        pushStringAnnotation(
-                            tag = "WORD_TAP",
-                            annotation = "$currentWordKey|$totalWordsInAyah|$coreWord"
-                        )
-                    }
-                    withStyle(
-                        SpanStyle(
-                            color = wordColor,
-                            background = effectiveWordBg
-                        )
-                    ) {
-                        append(coreWord)
-                    }
-                    if (isSpokenWord) {
-                        pop()
-                    }
-                }
-                if (trailingWaqf.isNotEmpty()) {
-                    val hasSajdah = trailingWaqf.contains('\u06E9')
-                    val nonSajdahWaqf = trailingWaqf.filter { it != '\u06E9' }
-                    if (nonSajdahWaqf.isNotEmpty()) {
-                        // Keep the trailing combining Waqf mark directly attached to coreWord with the
-                        // exact same background span so HarfBuzz GSUB/GPOS anchors it above the end of the word
-                        // and ICU LineBreaker never breaks between the word and its Waqf mark.
-                        withStyle(
-                            SpanStyle(
-                                color = if (isWordPronouncing) Color(0xFF064E3B) else waqfColor,
-                                background = effectiveWordBg
-                            )
-                        ) {
-                            append(nonSajdahWaqf)
-                        }
-                    }
-                    if (hasSajdah) {
-                        withStyle(
-                            SpanStyle(
-                                color = divineNameColor,
-                                background = bgHighlight
-                            )
-                        ) {
-                            append("\u202F۩")
-                        }
-                    }
-                }
+            if (isSpokenWord) {
+                pushStringAnnotation(
+                    tag = "WORD_TAP",
+                    annotation = "$currentWordKey|$totalWordsInAyah|$coreWord"
+                )
+            }
+            // Append the entire token (including any leading/trailing Quranic marks) as a single
+            // continuous inline Arabic sequence so HarfBuzz shapes the word and its marks naturally.
+            withStyle(
+                SpanStyle(
+                    color = tokenColor,
+                    background = effectiveWordBg
+                )
+            ) {
+                append(token)
+            }
+            if (isSpokenWord) {
+                pop()
             }
         }
     }
@@ -2793,12 +2700,16 @@ private fun MushafPageContent(
             .padding(3.dp)
             .border(1.dp, GoldBorder, RoundedCornerShape(13.dp))
             .clip(RoundedCornerShape(13.dp))
-            .background(pageCardColor)
+            .background(pageCardColor),
+        contentAlignment = Alignment.TopCenter
     ) {
+        // Fixed reading column: max-width 46rem (736.dp), centered with margin-inline auto and 16px (16.dp) side padding
         Column(
             modifier = Modifier
+                .widthIn(max = 736.dp)
                 .fillMaxSize()
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+                .padding(horizontal = 16.dp, vertical = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // 1. Ornamental Bright Mushaf Top Header Bar
@@ -2955,7 +2866,11 @@ private fun MushafPageContent(
 
             Spacer(modifier = Modifier.height(3.dp))
 
-            // 2. Main Verses Single-Page Auto-Fit Viewport (Fits 100% of page on ONE screen WITHOUT vertical scrolling)
+            // 2. Main Verses Viewport:
+            // - Height equal to visible screen minus header and bottom bar (weight(1f))
+            // - overflow: hidden (clipToBounds()), never scrolls and has no scrollbar
+            // - ResizeObserver equivalent via onSizeChanged so it re-fits when toolbars show/hide or window resizes
+            // - Dynamic 0.5-step font-size fitting in [12, 34] with line-height = 2.05 * font-size and 2.dp vertical padding
             if (!isAyahByAyahMode) {
                 val surahGroups = remember(verses) {
                     val groups = mutableListOf<Pair<OfflineVerse, List<OfflineVerse>>>()
@@ -2978,108 +2893,158 @@ private fun MushafPageContent(
                     groups
                 }
 
-                val textMeasurer = rememberTextMeasurer()
+                val groupPlainTexts = remember(surahGroups) {
+                    surahGroups.map { (firstV, groupVerses) ->
+                        Triple(firstV, buildCanonicalGroupPlainText(groupVerses), groupVerses)
+                    }
+                }
+
                 val density = LocalDensity.current
+                val textMeasurer = rememberTextMeasurer()
+                var wrapperWidthPx by remember { mutableIntStateOf(0) }
+                var wrapperHeightPx by remember { mutableIntStateOf(0) }
+                var measuredSurahBannerHeightPx by remember { mutableIntStateOf(0) }
+                var postLayoutOverflowStepDownSp by remember(pageNumber, verses, wrapperWidthPx, wrapperHeightPx) {
+                    mutableFloatStateOf(0f)
+                }
 
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .clipToBounds() // overflow: hidden — the page itself never scrolls
+                        .onSizeChanged { size ->
+                            if (size.width != wrapperWidthPx || size.height != wrapperHeightPx) {
+                                wrapperWidthPx = size.width
+                                wrapperHeightPx = size.height
+                            }
+                        },
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    val availWidthPx = constraints.maxWidth.coerceAtLeast(100)
-                    val availHeightPx = constraints.maxHeight.coerceAtLeast(100)
+                    val availableWidthPx = if (wrapperWidthPx > 0) wrapperWidthPx else constraints.maxWidth
+                    val availableHeightPx = if (wrapperHeightPx > 0) wrapperHeightPx else constraints.maxHeight
+                    val blockVerticalPadPx = with(density) { 4.dp.toPx().toInt() } // 2.dp top + 2.dp bottom
+                    val defaultSurahBannerPx = with(density) { 46.dp.toPx().toInt() }
+                    val effectiveSurahBannerPx = if (measuredSurahBannerHeightPx > 0) {
+                        measuredSurahBannerHeightPx + blockVerticalPadPx
+                    } else {
+                        defaultSurahBannerPx
+                    }
 
-                    // Automatically compute the largest BOLD font size that fits 100% of this page's verses
-                    // on a single screen without ANY vertical scrolling.
-                    // CRITICAL: This calculation depends ONLY on (pageNumber, verses, availWidthPx, availHeightPx)
-                    // and NEVER on bookmarkedSurah, bookmarkedAyah, focusedReadingVerseKey, or memorizedAyahKeys,
-                    // so the page font size and line wraps remain 100% locked while reading or tapping verses!
-                    val autoFittedFontSp = remember(
-                        pageNumber,
-                        verses,
-                        availWidthPx,
-                        availHeightPx
-                    ) {
-                        var bannerOverheadPx = 0f
-                        val groupStrings = surahGroups.map { (firstV, groupVerses) ->
+                    // Measure total page content height at a candidate font size (with line-height = 2.05)
+                    fun measureTotalPageHeightPx(candidateFontSp: Float): Int {
+                        if (availableWidthPx <= 0) return 0
+                        val candidateStyle = TextStyle(
+                            fontFamily = AmiriQuranFontFamily,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = candidateFontSp.sp,
+                            lineHeight = (candidateFontSp * 2.05f).sp,
+                            fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
+                            platformStyle = PlatformTextStyle(includeFontPadding = true),
+                            lineHeightStyle = LineHeightStyle(
+                                alignment = LineHeightStyle.Alignment.Center,
+                                trim = LineHeightStyle.Trim.None
+                            ),
+                            textAlign = TextAlign.Center,
+                            textDirection = TextDirection.Rtl
+                        )
+                        var totalHeight = blockVerticalPadPx
+                        for ((firstV, plainText, _) in groupPlainTexts) {
                             if (firstV.ayahNumber == 1) {
-                                bannerOverheadPx += with(density) { 42.dp.toPx() }
+                                totalHeight += effectiveSurahBannerPx
                                 if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
-                                    bannerOverheadPx += with(density) { 28.dp.toPx() }
+                                    val basmalahLayout = textMeasurer.measure(
+                                        text = AnnotatedString("بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ"),
+                                        style = candidateStyle,
+                                        constraints = Constraints(maxWidth = availableWidthPx)
+                                    )
+                                    totalHeight += basmalahLayout.size.height + blockVerticalPadPx
                                 }
                             }
-                            buildCanonicalGroupPlainText(groupVerses)
+                            val groupLayout = textMeasurer.measure(
+                                text = AnnotatedString(plainText),
+                                style = candidateStyle,
+                                constraints = Constraints(maxWidth = availableWidthPx)
+                            )
+                            totalHeight += groupLayout.size.height + blockVerticalPadPx
                         }
-
-                        // Generous safety margin so the last line never clips inside the single-page frame
-                        val targetMaxHeightPx = (availHeightPx - bannerOverheadPx - with(density) { 16.dp.toPx() })
-                            .coerceAtLeast(60f)
-
-                        var chosenSp = 13.5f
-                        var candidate = 31f
-                        while (candidate >= 12.5f) {
-                            var measuredTotalHeight = 0
-                            for (gStr in groupStrings) {
-                                val res = textMeasurer.measure(
-                                    text = gStr,
-                                    style = TextStyle(
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = candidate.sp,
-                                        lineHeight = (candidate * 1.44f).sp,
-                                        fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
-                                        platformStyle = PlatformTextStyle(includeFontPadding = true),
-                                        lineHeightStyle = LineHeightStyle(
-                                            alignment = LineHeightStyle.Alignment.Center,
-                                            trim = LineHeightStyle.Trim.None
-                                        ),
-                                        textAlign = TextAlign.Justify,
-                                        textDirection = TextDirection.Rtl
-                                    ),
-                                    constraints = Constraints(maxWidth = (availWidthPx - 6).coerceAtLeast(80))
-                                )
-                                measuredTotalHeight += res.size.height + with(density) { 4.dp.roundToPx() }
-                            }
-                            if (measuredTotalHeight <= targetMaxHeightPx) {
-                                chosenSp = candidate
-                                break
-                            }
-                            candidate -= 0.5f
-                        }
-                        chosenSp
+                        return totalHeight
                     }
 
-                    val zoomDeltaSp = when (fontZoomStep) {
-                        1 -> 3.5f
-                        2 -> 7.0f
-                        3 -> 11.0f
-                        4 -> -2.0f
-                        else -> 0f
-                    }
-                    val displayFontSp = (autoFittedFontSp + zoomDeltaSp).coerceIn(13f, 40f)
-                    val effectiveLineHeightSp = displayFontSp * 1.44f
-                    val isZoomScrollEnabled = fontZoomStep in 1..3
-                    val pageScrollState = rememberScrollState()
+                    // Auto-fit font-size in 0.5 steps between 12 and 34 whenever pageNumber, verses, or wrapper dimensions change
+                    val fittedFontSp = remember(
+                        pageNumber,
+                        groupPlainTexts,
+                        availableWidthPx,
+                        availableHeightPx,
+                        effectiveSurahBannerPx
+                    ) {
+                        if (availableWidthPx <= 0 || availableHeightPx <= 0) {
+                            (maxWidth.value * 0.052f).coerceIn(22f, 34f)
+                        } else {
+                            val minFontSp = 12.0f
+                            val maxFontSp = 34.0f
+                            val stepSp = 0.5f
+                            // Start from clamp(22px, 5.2vw, 34px) quantized to 0.5 steps
+                            var candidateSp = (((maxWidth.value * 0.052f).coerceIn(22f, 34f) * 2f).toInt() / 2f)
+                                .coerceIn(minFontSp, maxFontSp)
+                            var measuredHeight = measureTotalPageHeightPx(candidateSp)
 
-                    // Single-Page Column (Auto-fits 100% of page when fontZoomStep == 0, or scrolls smoothly when user enlarges font via Tt)
+                            if (measuredHeight > availableHeightPx) {
+                                // Taller than wrapper: decrease font-size in 0.5 steps until it fits (min 12)
+                                while (measuredHeight > availableHeightPx && candidateSp > minFontSp) {
+                                    candidateSp = (candidateSp - stepSp).coerceAtLeast(minFontSp)
+                                    measuredHeight = measureTotalPageHeightPx(candidateSp)
+                                }
+                            } else if (measuredHeight < availableHeightPx) {
+                                // Shorter than wrapper: increase font-size in 0.5 steps up to 34 while it still fits
+                                while (candidateSp < maxFontSp) {
+                                    val nextSp = (candidateSp + stepSp).coerceAtMost(maxFontSp)
+                                    val nextHeight = measureTotalPageHeightPx(nextSp)
+                                    if (nextHeight <= availableHeightPx) {
+                                        candidateSp = nextSp
+                                        measuredHeight = nextHeight
+                                    } else {
+                                        break
+                                    }
+                                }
+                            }
+                            candidateSp
+                        }
+                    }
+
+                    val displayFontSp = (fittedFontSp - postLayoutOverflowStepDownSp).coerceIn(12.0f, 34.0f)
+                    // Keep line-height at 2.05 of the font-size
+                    val effectiveLineHeightSp = displayFontSp * 2.05f
+
+                    val renderedGroupHeights = remember(pageNumber, groupPlainTexts.size) {
+                        mutableStateMapOf<Int, Int>()
+                    }
+                    val renderedBasmalahHeights = remember(pageNumber, groupPlainTexts.size) {
+                        mutableStateMapOf<Int, Int>()
+                    }
+
                     Column(
                         modifier = Modifier
+                            .widthIn(max = 736.dp)
                             .fillMaxSize()
-                            .then(
-                                if (isZoomScrollEnabled) Modifier.verticalScroll(pageScrollState)
-                                else Modifier
-                            ),
+                            .clipToBounds() // Never allow vertical scroll or scrollbar
+                            .padding(vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = if (isZoomScrollEnabled) Arrangement.Top else Arrangement.Center
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        surahGroups.forEach { (firstV, groupVerses) ->
+                        surahGroups.forEachIndexed { groupIdx, (firstV, groupVerses) ->
                             // Show Ornamental Surah Header if Ayah 1 is on this page
                             if (firstV.ayahNumber == 1) {
                                 SurahOrnamentalBanner(
                                     surahNameAr = firstV.surahNameAr,
                                     revelationPlaceAr = firstV.revelationPlaceAr,
-                                    isNightMode = isNightMode
+                                    isNightMode = isNightMode,
+                                    onHeightMeasured = { h ->
+                                        if (h > 0 && h != measuredSurahBannerHeightPx) {
+                                            measuredSurahBannerHeightPx = h
+                                        }
+                                    }
                                 )
                                 if (firstV.surahNumber != 1 && firstV.surahNumber != 9) {
                                     val basmalahAnnotated = remember(isNightMode, displayFontSp) {
@@ -3090,24 +3055,32 @@ private fun MushafPageContent(
                                                 divineNameColor = divineNameColor,
                                                 waqfColor = waqfMarkColor,
                                                 bgHighlight = Color.Transparent,
-                                                fontSizeSp = (displayFontSp - 0.5f).coerceAtLeast(14f)
+                                                fontSizeSp = displayFontSp
                                             )
                                         }
                                     }
                                     Text(
                                         text = basmalahAnnotated,
+                                        onTextLayout = { result ->
+                                            renderedBasmalahHeights[groupIdx] = result.size.height + blockVerticalPadPx
+                                        },
                                         style = TextStyle(
-                                            fontFamily = AmiriFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = (displayFontSp - 0.5f).coerceAtLeast(14f).sp,
+                                            fontFamily = AmiriQuranFontFamily,
+                                            fontWeight = FontWeight.Normal,
+                                            fontSize = displayFontSp.sp,
+                                            lineHeight = effectiveLineHeightSp.sp,
                                             fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
                                             platformStyle = PlatformTextStyle(includeFontPadding = true),
+                                            lineHeightStyle = LineHeightStyle(
+                                                alignment = LineHeightStyle.Alignment.Center,
+                                                trim = LineHeightStyle.Trim.None
+                                            ),
                                             textAlign = TextAlign.Center,
                                             textDirection = TextDirection.Rtl
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 1.dp)
+                                            .padding(vertical = 2.dp)
                                     )
                                 }
                             }
@@ -3128,7 +3101,18 @@ private fun MushafPageContent(
                                 activeWordHighlightColor
                             ) {
                                 buildAnnotatedString {
-                                    groupVerses.forEach { v ->
+                                    groupVerses.forEachIndexed { verseIdx, v ->
+                                        if (verseIdx > 0) {
+                                            withStyle(
+                                                style = SpanStyle(
+                                                    color = textColor,
+                                                    background = Color.Transparent
+                                                )
+                                            ) {
+                                                append(" ")
+                                            }
+                                        }
+
                                         val tagKey = "${v.surahNumber}:${v.ayahNumber}"
                                         val isBookmarked = (bookmarkedSurah == v.surahNameAr && bookmarkedAyah == v.ayahNumber)
                                         val isMemorized = memorizedAyahKeys.contains(tagKey)
@@ -3164,19 +3148,17 @@ private fun MushafPageContent(
                                             else -> Color(0xFF9A6F0B)
                                         }
 
-                                        // Non-breaking, non-stretching glue (\u202F) binds the verse number
-                                        // to the final word of the verse without ever being stretched by TextAlign.Justify
+                                        // Keep the ayah number rosette inline at the end of each ayah
+                                        // with a standard single space (~0.15em inline margin) on each side.
                                         withStyle(
                                             style = SpanStyle(
                                                 color = ayahMarkerColor,
                                                 background = bgHighlight
                                             )
                                         ) {
-                                            append("\u202F")
+                                            append(" ")
                                         }
 
-                                        // Tag the bookmarked verse's ﴿number﴾ token directly without adding ANY dummy
-                                        // characters, preventing line reflow, BiDi reordering, or trailing gaps!
                                         if (isBookmarked) {
                                             pushStringAnnotation(tag = "BOOKMARKED_AYAH_MARKER", annotation = tagKey)
                                         }
@@ -3191,15 +3173,6 @@ private fun MushafPageContent(
                                         if (isBookmarked) {
                                             pop()
                                         }
-
-                                        withStyle(
-                                            style = SpanStyle(
-                                                color = textColor,
-                                                background = Color.Transparent
-                                            )
-                                        ) {
-                                            append(" ")
-                                        }
                                         pop()
                                     }
                                 }
@@ -3213,10 +3186,33 @@ private fun MushafPageContent(
 
                             Text(
                                 text = annotatedPageText,
-                                onTextLayout = { textLayoutResult = it },
+                                onTextLayout = { result ->
+                                    textLayoutResult = result
+                                    renderedGroupHeights[groupIdx] = result.size.height + blockVerticalPadPx
+                                    // Post-render verification: if actual rendered content exceeds wrapper height,
+                                    // step down by 0.5px/sp (down to 12) so it never clips or overflows.
+                                    var actualTotal = blockVerticalPadPx
+                                    for (i in surahGroups.indices) {
+                                        val gFirst = surahGroups[i].first
+                                        if (gFirst.ayahNumber == 1) {
+                                            actualTotal += effectiveSurahBannerPx
+                                            if (gFirst.surahNumber != 1 && gFirst.surahNumber != 9) {
+                                                actualTotal += (renderedBasmalahHeights[i] ?: 0)
+                                            }
+                                        }
+                                        actualTotal += (renderedGroupHeights[i] ?: 0)
+                                    }
+                                    if ((result.didOverflowHeight || actualTotal > availableHeightPx) &&
+                                        availableHeightPx > 0 &&
+                                        displayFontSp > 12.0f
+                                    ) {
+                                        postLayoutOverflowStepDownSp = (postLayoutOverflowStepDownSp + 0.5f)
+                                            .coerceAtMost(fittedFontSp - 12.0f)
+                                    }
+                                },
                                 style = TextStyle(
-                                    fontFamily = AmiriFontFamily,
-                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = AmiriQuranFontFamily,
+                                    fontWeight = FontWeight.Normal,
                                     fontSize = displayFontSp.sp,
                                     lineHeight = effectiveLineHeightSp.sp,
                                     fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
@@ -3225,41 +3221,16 @@ private fun MushafPageContent(
                                         alignment = LineHeightStyle.Alignment.Center,
                                         trim = LineHeightStyle.Trim.None
                                     ),
-                                    textAlign = TextAlign.Justify,
+                                    textAlign = TextAlign.Center,
                                     textDirection = TextDirection.Rtl
                                 ),
                                 modifier = Modifier
+                                    .widthIn(max = 736.dp)
                                     .fillMaxWidth()
-                                    .padding(vertical = 1.dp)
+                                    .padding(vertical = 2.dp)
                                     .drawWithContent {
                                         drawContent()
                                         val layout = textLayoutResult ?: return@drawWithContent
-                                        val rubStarAnns = annotatedPageText.getStringAnnotations(
-                                            tag = "RUB_STAR_ANCHOR",
-                                            start = 0,
-                                            end = annotatedPageText.length
-                                        )
-                                        for (ann in rubStarAnns) {
-                                            if (ann.start < ann.end && ann.end <= annotatedPageText.length) {
-                                                val box0 = layout.getBoundingBox(ann.start)
-                                                val box1 = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
-                                                val minLeft = minOf(box0.left, box1.left)
-                                                val maxRight = maxOf(box0.right, box1.right)
-                                                val lineIdx = layout.getLineForOffset(ann.start)
-                                                val lineTop = layout.getLineTop(lineIdx)
-                                                val lineBottom = layout.getLineBottom(lineIdx)
-                                                val lineH = (lineBottom - lineTop).coerceAtLeast(18f)
-                                                val starSize = maxOf(maxRight - minLeft, lineH * 0.84f)
-                                                val cx = (minLeft + maxRight) * 0.5f
-                                                val cy = (lineTop + lineBottom) * 0.5f
-                                                drawRubAlHizbStarOnCanvas(
-                                                    cx = cx,
-                                                    cy = cy,
-                                                    radius = starSize * 0.46f,
-                                                    isNightMode = isNightMode
-                                                )
-                                            }
-                                        }
                                         val ribbonAnns = annotatedPageText.getStringAnnotations(
                                             tag = "BOOKMARKED_AYAH_MARKER",
                                             start = 0,
@@ -3267,9 +3238,6 @@ private fun MushafPageContent(
                                         )
                                         for (ann in ribbonAnns) {
                                             if (ann.start < ann.end && ann.end <= annotatedPageText.length) {
-                                                // ann.start is '﴿' (right bracket in RTL) and ann.end - 1 is '﴾' (left bracket in RTL).
-                                                // Anchor the Waqf ribbon cleanly on the outer-left shoulder of '﴾' so it NEVER covers
-                                                // the verse digits inside ﴿...﴾, NEVER wraps to the next line, and leaves zero gap!
                                                 val boxOpen = layout.getBoundingBox(ann.start)
                                                 val boxClose = layout.getBoundingBox((ann.end - 1).coerceAtLeast(ann.start))
                                                 val markerLeft = minOf(boxOpen.left, boxClose.left)
@@ -3278,13 +3246,13 @@ private fun MushafPageContent(
                                                 val lineTop = layout.getLineTop(lineIdx)
                                                 val lineBottom = layout.getLineBottom(lineIdx)
                                                 val lineH = (lineBottom - lineTop).coerceAtLeast(16f)
-                                                val ribbonW = (lineH * 0.28f).coerceAtLeast(8f)
-                                                val ribbonH = (lineH * 0.58f).coerceAtLeast(14f)
+                                                val ribbonW = (lineH * 0.24f).coerceAtLeast(8f)
+                                                val ribbonH = (lineH * 0.48f).coerceAtLeast(14f)
                                                 val cx = (markerLeft + closeW * 0.14f).coerceIn(
                                                     ribbonW * 0.5f,
                                                     (size.width - ribbonW * 0.5f).coerceAtLeast(ribbonW * 0.5f)
                                                 )
-                                                val topY = lineTop + lineH * 0.04f
+                                                val topY = lineTop + lineH * 0.18f
                                                 drawWaqfGreenRibbonOnCanvas(
                                                     left = cx - ribbonW * 0.5f,
                                                     top = topY,
@@ -3368,9 +3336,10 @@ private fun MushafPageContent(
                     }
                 }
             } else {
-                // Ayah-by-Ayah Interactive Cards Mode on current page (with Shamarly Colored Divine Name & Full Tafsir)
+                // Ayah-by-Ayah Interactive Cards Mode on current page
                 LazyColumn(
                     modifier = Modifier
+                        .widthIn(max = 736.dp)
                         .fillMaxWidth()
                         .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -3408,7 +3377,7 @@ private fun MushafPageContent(
                                 }
                             )
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3490,10 +3459,11 @@ private fun MushafPageContent(
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
 
+                                val clampedCardFontSp = fontScaleSp.coerceIn(22f, 34f)
                                 val coloredAyahText = remember(
                                     v.textAr,
                                     isNightMode,
-                                    fontScaleSp,
+                                    clampedCardFontSp,
                                     isBookmarked,
                                     activeWordKey,
                                     activeWordHighlightColor
@@ -3505,14 +3475,14 @@ private fun MushafPageContent(
                                             divineNameColor = divineNameColor,
                                             waqfColor = waqfMarkColor,
                                             bgHighlight = Color.Transparent,
-                                            fontSizeSp = fontScaleSp,
+                                            fontSizeSp = clampedCardFontSp,
                                             verseTagKey = tagKey,
                                             activeWordKey = activeWordKey,
                                             activeWordHighlightColor = activeWordHighlightColor
                                         )
                                         val markerColor = if (isBookmarked) EmeraldGreen else if (isNightMode) GoldAccent else Color(0xFF9A6F0B)
                                         withStyle(SpanStyle(color = markerColor)) {
-                                            append("\u202F")
+                                            append(" ")
                                         }
                                         if (isBookmarked) {
                                             pushStringAnnotation(tag = "BOOKMARKED_AYAH_MARKER", annotation = tagKey)
@@ -3536,21 +3506,22 @@ private fun MushafPageContent(
                                     text = coloredAyahText,
                                     onTextLayout = { ayahTextLayout = it },
                                     style = TextStyle(
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = fontScaleSp.sp,
-                                        lineHeight = (fontScaleSp * 1.65f).sp,
+                                        fontFamily = AmiriQuranFontFamily,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = clampedCardFontSp.sp,
+                                        lineHeight = (clampedCardFontSp * 2.05f).sp,
                                         fontFeatureSettings = QURAN_OPENTYPE_FONT_FEATURES,
                                         platformStyle = PlatformTextStyle(includeFontPadding = true),
                                         lineHeightStyle = LineHeightStyle(
                                             alignment = LineHeightStyle.Alignment.Center,
                                             trim = LineHeightStyle.Trim.None
                                         ),
-                                        textAlign = TextAlign.Right,
+                                        textAlign = TextAlign.Center,
                                         textDirection = TextDirection.Rtl
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
                                         .drawWithContent {
                                             drawContent()
                                             val layout = ayahTextLayout ?: return@drawWithContent
@@ -3911,11 +3882,13 @@ private fun RubAlHizbStarIcon(
 private fun SurahOrnamentalBanner(
     surahNameAr: String,
     revelationPlaceAr: String,
-    isNightMode: Boolean
+    isNightMode: Boolean,
+    onHeightMeasured: (Int) -> Unit = {}
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .onSizeChanged { onHeightMeasured(it.height) }
             .padding(vertical = 2.dp),
         shape = RoundedCornerShape(10.dp),
         color = if (isNightMode) RoyalNavyDark else Color(0xFFF8F9FA),

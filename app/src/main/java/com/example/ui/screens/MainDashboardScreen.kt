@@ -706,7 +706,7 @@ fun MainDashboardScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                        .padding(horizontal = 10.dp, vertical = 14.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
@@ -723,54 +723,73 @@ fun MainDashboardScreen(
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         // Side Capsule 1: المعدل اليومي للقراءة
                                         Surface(
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(122.dp),
                                             shape = RoundedCornerShape(14.dp),
                                             color = Color(0xFFF3E9D2),
                                             border = BorderStroke(1.dp, GoldBorder)
                                         ) {
                                             Column(
                                                 modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 5.dp, vertical = 8.dp),
                                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                verticalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.Center
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier.fillMaxWidth()
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.Speed,
                                                         contentDescription = null,
                                                         tint = GoldAccent,
-                                                        modifier = Modifier.size(14.dp)
+                                                        modifier = Modifier.size(12.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(3.dp))
-                                                    Text(
+                                                    KhatmaCapsuleSingleLineText(
                                                         text = "المعدل اليومي",
-                                                        fontSize = 11.sp,
+                                                        initialFontSizeSp = 11f,
+                                                        minFontSizeSp = 8.5f,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = EmeraldGreen,
-                                                        textAlign = TextAlign.Center
+                                                        color = EmeraldGreen
                                                     )
                                                 }
-                                                Text(
-                                                    text = "${metrics.actualDailyPacePages} صفحة/يوم",
-                                                    fontSize = 12.5.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = Color(0xFF1A110B),
-                                                    textAlign = TextAlign.Center
-                                                )
-                                                Text(
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = Color(0xFFFDF8EC),
+                                                    border = BorderStroke(0.8.dp, GoldAccent.copy(alpha = 0.65f)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 4.dp, vertical = 5.dp)
+                                                    ) {
+                                                        KhatmaCapsuleSingleLineText(
+                                                            text = "${metrics.actualDailyPacePages} صفحة/يوم",
+                                                            initialFontSizeSp = 11.8f,
+                                                            minFontSizeSp = 8.5f,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color(0xFF1A110B)
+                                                        )
+                                                    }
+                                                }
+
+                                                KhatmaCapsuleSingleLineText(
                                                     text = "~1 ربع/يوم",
-                                                    fontSize = 10.5.sp,
+                                                    initialFontSizeSp = 10.5f,
+                                                    minFontSizeSp = 8.5f,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1A110B).copy(alpha = 0.72f),
-                                                    textAlign = TextAlign.Center
+                                                    color = Color(0xFF1A110B).copy(alpha = 0.75f)
                                                 )
                                             }
                                         }
@@ -778,9 +797,9 @@ fun MainDashboardScreen(
                                         // Center Progress Circle (Includes Percentage + Current Page + المتبقي للختم)
                                         Box(
                                             contentAlignment = Alignment.Center,
-                                            modifier = Modifier.size(138.dp)
+                                            modifier = Modifier.size(122.dp)
                                         ) {
-                                            val strokeWidth = 10.5.dp
+                                            val strokeWidth = 9.5.dp
                                             val primaryColor = EmeraldGreen
                                             val backgroundColor = GoldBorder.copy(alpha = 0.35f)
                                             val progressSweep = (metrics.progressPercentage / 100.0 * 360.0).toFloat()
@@ -805,86 +824,114 @@ fun MainDashboardScreen(
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 verticalArrangement = Arrangement.Center,
-                                                modifier = Modifier.padding(horizontal = 10.dp)
+                                                modifier = Modifier.padding(horizontal = 8.dp)
                                             ) {
                                                 Text(
                                                     text = "${metrics.progressPercentage}%",
-                                                    fontSize = 20.sp,
+                                                    fontSize = 18.sp,
                                                     fontWeight = FontWeight.ExtraBold,
                                                     color = EmeraldGreen,
-                                                    textAlign = TextAlign.Center
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                                 Text(
                                                     text = "${metrics.currentPage} / 604 ص",
-                                                    fontSize = 11.5.sp,
+                                                    fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
-                                                    textAlign = TextAlign.Center
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
-                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Spacer(modifier = Modifier.height(1.dp))
                                                 Text(
                                                     text = "متبقي ${metrics.remainingPages} ص",
-                                                    fontSize = 10.5.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = EmeraldGreen,
-                                                    textAlign = TextAlign.Center
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                                 Text(
                                                     text = "(${metrics.remainingRubCount} ربع حزب)",
-                                                    fontSize = 9.5.sp,
+                                                    fontSize = 9.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                                    textAlign = TextAlign.Center
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
 
                                         // Side Capsule 2: الموعد المتوقع لختام المصحف
                                         Surface(
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(122.dp),
                                             shape = RoundedCornerShape(14.dp),
                                             color = Color(0xFFF3E9D2),
                                             border = BorderStroke(1.dp, GoldBorder)
                                         ) {
                                             Column(
                                                 modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 5.dp, vertical = 8.dp),
                                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                verticalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.Center
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier.fillMaxWidth()
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.CalendarToday,
                                                         contentDescription = null,
                                                         tint = GoldAccent,
-                                                        modifier = Modifier.size(14.dp)
+                                                        modifier = Modifier.size(12.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(3.dp))
-                                                    Text(
+                                                    KhatmaCapsuleSingleLineText(
                                                         text = "ختام المصحف",
-                                                        fontSize = 11.sp,
+                                                        initialFontSizeSp = 11f,
+                                                        minFontSizeSp = 8.5f,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = EmeraldGreen,
-                                                        textAlign = TextAlign.Center
+                                                        color = EmeraldGreen
                                                     )
                                                 }
-                                                Text(
-                                                    text = metrics.projectedCompletionDate,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = Color(0xFF1A110B),
-                                                    textAlign = TextAlign.Center
-                                                )
-                                                Text(
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = Color(0xFFFDF8EC),
+                                                    border = BorderStroke(0.8.dp, GoldAccent.copy(alpha = 0.65f)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 4.dp, vertical = 5.dp)
+                                                    ) {
+                                                        // Wrap date in LTR directional isolate (\u2066..\u2069) and force single line
+                                                        KhatmaCapsuleSingleLineText(
+                                                            text = "\u2066${metrics.projectedCompletionDate}\u2069",
+                                                            initialFontSizeSp = 12.2f,
+                                                            minFontSizeSp = 8.5f,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color(0xFF1A110B)
+                                                        )
+                                                    }
+                                                }
+
+                                                KhatmaCapsuleSingleLineText(
                                                     text = "الموعد المتوقع",
-                                                    fontSize = 10.5.sp,
+                                                    initialFontSizeSp = 10.5f,
+                                                    minFontSizeSp = 8.5f,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1A110B).copy(alpha = 0.72f),
-                                                    textAlign = TextAlign.Center
+                                                    color = Color(0xFF1A110B).copy(alpha = 0.75f)
                                                 )
                                             }
                                         }
@@ -2619,3 +2666,33 @@ fun TasbeehSection() {
         )
     }
 }
+
+@Composable
+private fun KhatmaCapsuleSingleLineText(
+    text: String,
+    initialFontSizeSp: Float,
+    minFontSizeSp: Float = 8.5f,
+    fontWeight: FontWeight = FontWeight.Bold,
+    color: Color
+) {
+    var currentFontSizeSp by remember(text, initialFontSizeSp) {
+        mutableStateOf(initialFontSizeSp)
+    }
+
+    Text(
+        text = text,
+        fontSize = currentFontSizeSp.sp,
+        fontWeight = fontWeight,
+        color = color,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { layoutResult ->
+            if (layoutResult.didOverflowWidth && currentFontSizeSp > minFontSizeSp) {
+                currentFontSizeSp = (currentFontSizeSp - 0.5f).coerceAtLeast(minFontSizeSp)
+            }
+        }
+    )
+}
+
